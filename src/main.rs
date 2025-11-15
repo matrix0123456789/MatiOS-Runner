@@ -1,15 +1,17 @@
 use std::arch::asm;
-use std::env;
+use std::{env, mem};
+use std::alloc::{GlobalAlloc, Layout};
 use std::io::Read;
 use std::ops::Deref;
 
 pub struct ProcessStartInfo {
     dummy: u64,
-    debugPrint: extern "win64" fn(String),
+    debugPrint: extern "win64" fn(&str),
+    debugPrintInt: extern "win64" fn(u64),
 }
 fn main() {
     {
-        println!("{}", std::usize::MAX);
+        println!("{}", mem::size_of::<usize>());
         let mut filePath = String::new();
         let args: Vec<String> = env::args().collect();
         if (args.len() > 1) {
@@ -20,9 +22,16 @@ fn main() {
             return;
         }
         let function_pointer = loadExecutable(filePath);
+        extern "win64" fn debugPrint(x:&str){
+            println!("{}",x);
+        }
+        extern "win64" fn debugPrintInt(x:u64){
+            println!("{}",x);
+        }
         let info = Box::new(ProcessStartInfo {
             dummy: 123,
             debugPrint: debugPrint,
+            debugPrintInt: debugPrintInt
         });
         let infoPrtr = Box::into_raw(info);
         let ret = function_pointer(infoPrtr);
@@ -66,6 +75,8 @@ fn loadExecutable(filePath: String) -> extern "win64" fn(*mut ProcessStartInfo) 
     };
     return function_pointer;
 }
-extern "win64" fn debugPrint(x: String) {
-    println!("{}",x);
-}
+
+
+
+
+
