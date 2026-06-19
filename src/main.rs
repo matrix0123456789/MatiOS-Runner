@@ -1,4 +1,7 @@
+extern crate core;
+
 use crate::elf_parser::{Elf64Shdr, ElfParser};
+use core::panic::PanicInfo;
 use std::alloc::{GlobalAlloc, Layout};
 use std::any::Any;
 use std::arch::asm;
@@ -16,6 +19,8 @@ pub struct ProcessStartInfo {
     dummy: u64,
     debugPrint: extern "win64" fn(&str),
     debugPrintInt: extern "win64" fn(u64),
+    debugPanicRust: extern "win64" fn(&PanicInfo),
+    allocate: extern "win64" fn(size: u64, align: u64) -> u64,
 }
 fn main() {
     {
@@ -31,15 +36,31 @@ fn main() {
         }
         let function_pointer = loadExecutable(filePath);
         extern "win64" fn debugPrint(x: &str) {
+            println!("Printing ptr: 0x{:X}", x.as_ptr() as usize);
             println!("{}", x);
         }
+        extern "win64" fn debugPanicRust(x: &PanicInfo) {
+            println!("Panic inside");
+        }
         extern "win64" fn debugPrintInt(x: u64) {
-            println!("{}", x);
+            println!("0x{:X} - {}", x, x);
+        }
+        extern "win64" fn allocate(size: u64, align: u64) -> u64 {
+            let all = unsafe {
+                std::alloc::alloc(Layout::from_size_align_unchecked(
+                    size as usize,
+                    align as usize,
+                )) as u64
+            };
+            println!("allocatign {} alligned {} to {}", size, align, all);
+            return all;
         }
         let info = Box::new(ProcessStartInfo {
             dummy: 123,
             debugPrint: debugPrint,
             debugPrintInt: debugPrintInt,
+            debugPanicRust: debugPanicRust,
+            allocate: allocate,
         });
         let infoPrtr = Box::into_raw(info);
         let ret = function_pointer(infoPrtr);
@@ -100,8 +121,7 @@ fn loadExecutable(filePath: String) -> extern "win64" fn(*mut ProcessStartInfo) 
             let size = section.header.sh_size as usize;
             allocated_memory[offset..offset + size].copy_from_slice(&section.data);
             if (section.name == ".text") {
-                text_offset=offset;
-
+                text_offset = offset;
             }
         }
     }
@@ -143,7 +163,11 @@ fn loadExecutable(filePath: String) -> extern "win64" fn(*mut ProcessStartInfo) 
     //copy buffer to ptr
     let buffer_executable = ptr as *mut u8;
     unsafe {
-        std::ptr::copy_nonoverlapping(allocated_memory.as_ptr(), buffer_executable, allocated_memory.len());
+        std::ptr::copy_nonoverlapping(
+            allocated_memory.as_ptr(),
+            buffer_executable,
+            allocated_memory.len(),
+        );
     }
 
     let function_pointer: extern "win64" fn(*mut ProcessStartInfo) -> u64 = unsafe {
@@ -154,4 +178,3 @@ fn loadExecutable(filePath: String) -> extern "win64" fn(*mut ProcessStartInfo) 
     println!("loaded to pointer: {:X}", function_pointer as u64);
     return function_pointer;
 }
-
