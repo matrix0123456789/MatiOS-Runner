@@ -1,6 +1,7 @@
 extern crate core;
 
 use crate::elf_parser::{Elf64Shdr, ElfParser};
+use crate::process_start_info::ProcessStartInfo;
 use crate::syscalls::debug::print_v1::PrintV1;
 use crate::syscalls::process::current_process_info_v1::CurrentProcessInfoV1Response;
 use crate::syscalls::{SyscallRequest, SyscallResponse};
@@ -9,6 +10,7 @@ use std::alloc::{alloc, GlobalAlloc, Layout};
 use std::any::Any;
 use std::arch::asm;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::hash::Hash;
 use std::io::Read;
 use std::ops::{Deref, DerefMut};
@@ -17,68 +19,61 @@ use std::rc::Rc;
 use std::{env, mem, process};
 
 mod elf_parser;
-mod syscalls;
-mod uuid;
-pub mod typedValue;
+pub mod host_machine;
+pub mod process_start_info;
+pub mod resource_local_registry;
+pub mod syscalls;
+pub mod typed_value;
+pub mod uuid;
 
-pub struct ProcessStartInfo {
-    dummy: u64,
-    debugPrint: extern "win64" fn(&str),
-    debugPrintInt: extern "win64" fn(u64),
-    debugPanicRust: extern "win64" fn(&PanicInfo),
-    allocate: extern "win64" fn(size: u64, align: u64) -> u64,
-    syscallSync: extern "win64" fn(usize) -> usize,
-}
-fn main() {
+fn main() -> Result<(), std::io::Error> {
     {
         let mut filePath = String::new();
-        let args: Vec<String> = env::args().collect();
+        let mut args: Vec<String> = env::args().collect();
+        let mut verbose = true; //tmp true, change to false
+        for i in 0..args.len() {
+            let arg = &args[i];
+            if arg == "--verbose" || arg == "-V" {
+                verbose = true;
+                println!("Verbose mode enabled");
+                args.remove(i);
+                break;
+            }
+        }
         if (args.len() > 1) {
             filePath = args[1].clone();
         } else if (env::var("EXE").is_ok()) {
             filePath = env::var("EXE").unwrap();
         } else {
-            return;
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "No executable specified",
+            ));
         }
         let function_pointer = loadExecutable(filePath);
-        extern "win64" fn debugPrint(x: &str) {
-            println!("{}", x);
+        let info: ProcessStartInfo;
+        if verbose {
+            info = ProcessStartInfo::getVerboseInfo();
+        } else {
+            info = ProcessStartInfo::getInfo();
         }
-        extern "win64" fn debugPanicRust(x: &PanicInfo) {
-            vec![].push(x);
-            println!("Panic inside");
-        }
-        extern "win64" fn debugPrintInt(x: u64) {
-            println!("0x{:X} - {}", x, x);
-        }
-        extern "win64" fn allocate(size: u64, align: u64) -> u64 {
-            let all = unsafe {
-                std::alloc::alloc(Layout::from_size_align_unchecked(
-                    size as usize,
-                    align as usize,
-                )) as u64
-            };
-            return all;
-        }
-        extern "win64" fn syscall_sync(req: usize) -> usize {
-            return syscalls::syscall_sync(req);
-        }
-        let info = Box::new(ProcessStartInfo {
-            dummy: 123,
-            debugPrint: debugPrint,
-            debugPrintInt: debugPrintInt,
-            debugPanicRust: debugPanicRust,
-            allocate: allocate,
-            syscallSync: syscall_sync,
-        });
-        let infoPrtr = Box::into_raw(info);
+        let infoPrtr = Box::into_raw(Box::from(info));
         let ret = function_pointer(infoPrtr);
 
-        println!("Execution ended with return value: {}", ret);
+        if (verbose) {
+            println!("Execution ended with return value: {}", ret);
+        }
+        if (ret == 0) {
+            return Ok(());
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Execution ended with return value: {}", ret),
+            ));
+        }
     }
 }
 fn loadExecutable(filePath: String) -> extern "win64" fn(*mut ProcessStartInfo) -> u64 {
-
     let mut file = std::fs::File::open(&filePath).unwrap();
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).unwrap();

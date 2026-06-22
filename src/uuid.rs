@@ -1,7 +1,7 @@
 use core::error;
 use core::result;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq, Hash)]
 pub struct Uuid([u8; 16]);
 
 #[macro_export]
@@ -213,4 +213,7 @@ impl Clone for Uuid {
     fn clone(&self) -> Self {
         Uuid::from_u128(self.as_u128())
     }
+}
+impl Copy for Uuid {
+    
 }

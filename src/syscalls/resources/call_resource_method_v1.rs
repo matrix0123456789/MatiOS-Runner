@@ -3,7 +3,7 @@ use crate::uuid::Uuid;
 use std::boxed::Box;
 use std::string::String;
 use std::vec::Vec;
-use crate::typedValue::TypedValue;
+use crate::typed_value::TypedValue;
 
 pub struct CallResourceMethodV1 {
     pub resource: Uuid,
