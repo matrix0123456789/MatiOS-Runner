@@ -19,6 +19,7 @@ use std::{env, mem, process};
 mod elf_parser;
 mod syscalls;
 mod uuid;
+pub mod typedValue;
 
 pub struct ProcessStartInfo {
     dummy: u64,
@@ -44,6 +45,7 @@ fn main() {
             println!("{}", x);
         }
         extern "win64" fn debugPanicRust(x: &PanicInfo) {
+            vec![].push(x);
             println!("Panic inside");
         }
         extern "win64" fn debugPrintInt(x: u64) {
@@ -59,49 +61,7 @@ fn main() {
             return all;
         }
         extern "win64" fn syscall_sync(req: usize) -> usize {
-            let request = unsafe { &*(req as *const SyscallRequest<u8>) };
-            unsafe {
-                if ((*request).uuid
-                    == crate::uuid::Uuid::parse_str("7b16bee9-d0b8-4bd5-86d7-8225840ce006")
-                        .unwrap())
-                {
-                    let requestTyped = unsafe { &*(req as *const SyscallRequest<PrintV1>) };
-                    println!("text: {}", requestTyped.payload.text);
-                } else if ((*request).uuid
-                    == crate::uuid::Uuid::parse_str("6ac0d646-72dc-4fe4-9fdc-f944f1a61491")
-                        .unwrap())
-                {
-                    println!("get current process info");
-                    let processId = process::id();
-                    let process= windows_sys::Win32::System::Threading::GetCurrentProcess();
-                    let sytheticProcessId = 0x30312746_893c_4654_a9b5_000000000000;
-                    let mut nameRaw=[0 as u16;1024];
-                    let nameSize=Box::new(1024 as u32);
-                    let success=windows_sys::Win32::System::Threading::QueryFullProcessImageNameW(process, 0, nameRaw.as_mut_ptr(), Box::into_raw(nameSize));
-                    let name=String::from_utf16(nameRaw.as_slice()).unwrap();
-                    let response = SyscallResponse {
-                        size: size_of::<CurrentProcessInfoV1Response>(),
-                        request_uuid: (*request).uuid.clone(),
-                        payload: CurrentProcessInfoV1Response {
-                            uuid: crate::uuid::Uuid::from_u128(sytheticProcessId + processId as u128),
-                            name: name,
-                        },
-                    };
-                    return Box::into_raw(Box::from(response)) as usize;
-                } else {
-                    println!("Unknows sycall, size: {}", (*request).size);
-                    println!(
-                        "uuid: {}",
-                        (*request)
-                            .uuid
-                            .as_bytes()
-                            .iter()
-                            .map(|x| format!("{:02X}", x))
-                            .collect::<String>()
-                    );
-                }
-            }
-            return 0;
+            return syscalls::syscall_sync(req);
         }
         let info = Box::new(ProcessStartInfo {
             dummy: 123,
@@ -118,30 +78,11 @@ fn main() {
     }
 }
 fn loadExecutable(filePath: String) -> extern "win64" fn(*mut ProcessStartInfo) -> u64 {
-    println!("Hello, world!");
 
-    println!("filePath, {}!", filePath);
-    //open file stream
     let mut file = std::fs::File::open(&filePath).unwrap();
-    //read binary whole file
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).unwrap();
-
     let sections = ElfParser::parse(buffer.as_slice());
-    // let mut text_buffer = Vec::new();
-    // let mut rela_dyn_buffer: Vec<u8> = Vec::new();
-    // let mut text_header = Elf64Shdr {
-    //     sh_name: 0,
-    //     sh_type: 0,
-    //     sh_flags: 0,
-    //     sh_addr: 0,
-    //     sh_offset: 0,
-    //     sh_size: 0,
-    //     sh_link: 0,
-    //     sh_info: 0,
-    //     sh_addralign: 0,
-    //     sh_entsize: 0,
-    // };
     let mut start = i64::MAX;
     let mut end: i64 = 0;
 
@@ -158,13 +99,6 @@ fn loadExecutable(filePath: String) -> extern "win64" fn(*mut ProcessStartInfo) 
     let mut text_offset = 0;
     let mut allocated_memory = vec![0 as u8; (end - start) as usize];
     for section in sections {
-        // if (section.name == ".text") {
-        //     text_buffer = section.data;
-        //     text_header = section.header;
-        // } else if (section.name == ".rela.dyn") {
-        //     rela_dyn_buffer = section.data;
-        // }
-
         if ((section.header.sh_flags & 0x02) > 0) {
             let offset = section.header.sh_addr as usize - start as usize;
             let size = section.header.sh_size as usize;
@@ -174,26 +108,6 @@ fn loadExecutable(filePath: String) -> extern "win64" fn(*mut ProcessStartInfo) 
             }
         }
     }
-    // let rela_dyn = rela_dyn_buffer.as_ptr() as *const u64;
-    // for i in 0..(rela_dyn_buffer.len() / 24) as isize {
-    //     unsafe {
-    //         let offset = read_volatile(rela_dyn.byte_offset(i * 24 + 0));
-    //         let info = read_volatile(rela_dyn.byte_offset(i * 24 + 8));
-    //         let addent = read_volatile(rela_dyn.byte_offset(i * 24 + 16));
-    //         if (offset >= (text_header).sh_addr
-    //             && offset < (text_header).sh_addr + text_buffer.len() as u64)
-    //         {
-    //             println!("{} -> {}", offset, addent);
-    //         }
-    //         if (addent >= (text_header).sh_addr
-    //             && addent < (text_header).sh_addr + text_buffer.len() as u64)
-    //         {
-    //             println!("{} -> {}", offset, addent);
-    //         }
-    //     }
-    // }
-
-    //print file contents
 
     use windows_sys::Win32::System::Memory::{
         VirtualAlloc, MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READWRITE,
@@ -209,7 +123,6 @@ fn loadExecutable(filePath: String) -> extern "win64" fn(*mut ProcessStartInfo) 
         )
     };
     assert!(!ptr.is_null());
-    //copy buffer to ptr
     let buffer_executable = ptr as *mut u8;
     unsafe {
         std::ptr::copy_nonoverlapping(
