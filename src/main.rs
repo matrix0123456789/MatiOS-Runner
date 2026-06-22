@@ -1,8 +1,11 @@
 extern crate core;
 
 use crate::elf_parser::{Elf64Shdr, ElfParser};
+use crate::syscalls::debug::print_v1::PrintV1;
+use crate::syscalls::process::current_process_info_v1::CurrentProcessInfoV1Response;
+use crate::syscalls::{SyscallRequest, SyscallResponse};
 use core::panic::PanicInfo;
-use std::alloc::{GlobalAlloc, Layout};
+use std::alloc::{alloc, GlobalAlloc, Layout};
 use std::any::Any;
 use std::arch::asm;
 use std::cell::RefCell;
@@ -11,9 +14,11 @@ use std::io::Read;
 use std::ops::{Deref, DerefMut};
 use std::ptr::read_volatile;
 use std::rc::Rc;
-use std::{env, mem};
+use std::{env, mem, process};
 
 mod elf_parser;
+mod syscalls;
+mod uuid;
 
 pub struct ProcessStartInfo {
     dummy: u64,
@@ -21,10 +26,10 @@ pub struct ProcessStartInfo {
     debugPrintInt: extern "win64" fn(u64),
     debugPanicRust: extern "win64" fn(&PanicInfo),
     allocate: extern "win64" fn(size: u64, align: u64) -> u64,
+    syscallSync: extern "win64" fn(usize) -> usize,
 }
 fn main() {
     {
-        println!("{}", mem::size_of::<usize>());
         let mut filePath = String::new();
         let args: Vec<String> = env::args().collect();
         if (args.len() > 1) {
@@ -36,7 +41,6 @@ fn main() {
         }
         let function_pointer = loadExecutable(filePath);
         extern "win64" fn debugPrint(x: &str) {
-            println!("Printing ptr: 0x{:X}", x.as_ptr() as usize);
             println!("{}", x);
         }
         extern "win64" fn debugPanicRust(x: &PanicInfo) {
@@ -52,8 +56,52 @@ fn main() {
                     align as usize,
                 )) as u64
             };
-            println!("allocatign {} alligned {} to {}", size, align, all);
             return all;
+        }
+        extern "win64" fn syscall_sync(req: usize) -> usize {
+            let request = unsafe { &*(req as *const SyscallRequest<u8>) };
+            unsafe {
+                if ((*request).uuid
+                    == crate::uuid::Uuid::parse_str("7b16bee9-d0b8-4bd5-86d7-8225840ce006")
+                        .unwrap())
+                {
+                    let requestTyped = unsafe { &*(req as *const SyscallRequest<PrintV1>) };
+                    println!("text: {}", requestTyped.payload.text);
+                } else if ((*request).uuid
+                    == crate::uuid::Uuid::parse_str("6ac0d646-72dc-4fe4-9fdc-f944f1a61491")
+                        .unwrap())
+                {
+                    println!("get current process info");
+                    let processId = process::id();
+                    let process= windows_sys::Win32::System::Threading::GetCurrentProcess();
+                    let sytheticProcessId = 0x30312746_893c_4654_a9b5_000000000000;
+                    let mut nameRaw=[0 as u16;1024];
+                    let nameSize=Box::new(1024 as u32);
+                    let success=windows_sys::Win32::System::Threading::QueryFullProcessImageNameW(process, 0, nameRaw.as_mut_ptr(), Box::into_raw(nameSize));
+                    let name=String::from_utf16(nameRaw.as_slice()).unwrap();
+                    let response = SyscallResponse {
+                        size: size_of::<CurrentProcessInfoV1Response>(),
+                        request_uuid: (*request).uuid.clone(),
+                        payload: CurrentProcessInfoV1Response {
+                            uuid: crate::uuid::Uuid::from_u128(sytheticProcessId + processId as u128),
+                            name: name,
+                        },
+                    };
+                    return Box::into_raw(Box::from(response)) as usize;
+                } else {
+                    println!("Unknows sycall, size: {}", (*request).size);
+                    println!(
+                        "uuid: {}",
+                        (*request)
+                            .uuid
+                            .as_bytes()
+                            .iter()
+                            .map(|x| format!("{:02X}", x))
+                            .collect::<String>()
+                    );
+                }
+            }
+            return 0;
         }
         let info = Box::new(ProcessStartInfo {
             dummy: 123,
@@ -61,6 +109,7 @@ fn main() {
             debugPrintInt: debugPrintInt,
             debugPanicRust: debugPanicRust,
             allocate: allocate,
+            syscallSync: syscall_sync,
         });
         let infoPrtr = Box::into_raw(info);
         let ret = function_pointer(infoPrtr);
@@ -175,6 +224,5 @@ fn loadExecutable(filePath: String) -> extern "win64" fn(*mut ProcessStartInfo) 
             (buffer_executable.byte_offset(text_offset as isize)),
         )
     };
-    println!("loaded to pointer: {:X}", function_pointer as u64);
     return function_pointer;
 }

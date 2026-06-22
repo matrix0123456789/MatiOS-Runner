@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-windows-sys = { version = "0.59", features = ["Win32", "Win32_System", "Win32_System_Memory"] }
+windows-sys = { version = "0.61.2", features = ["Win32", "Win32_System", "Win32_System_Memory", "Win32_System_Kernel", "Win32_System_Threading"] }
 
 [[bin]]
 target = "x86_64-pc-windows-gnu"

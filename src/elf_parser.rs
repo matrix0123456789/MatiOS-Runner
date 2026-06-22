@@ -32,7 +32,6 @@ impl ElfParser {
             let name_offset = shdr.sh_name as usize;
             let name = strtab[name_offset..].split(|&c| c == 0).next().unwrap();
             let name_str = String::from_utf8_lossy(name);
-            println!("Section {}: {}", i, name_str);
             sections.push(ElfSection {
                 name: name_str.to_string(),
                 data: Vec::from(
