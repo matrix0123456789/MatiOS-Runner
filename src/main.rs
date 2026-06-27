@@ -25,6 +25,7 @@ pub mod resource_local_registry;
 pub mod syscalls;
 pub mod typed_value;
 pub mod uuid;
+pub mod resources;
 
 fn main() -> Result<(), std::io::Error> {
     {

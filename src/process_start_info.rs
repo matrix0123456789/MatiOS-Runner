@@ -5,6 +5,7 @@ use core::panic::PanicInfo;
 use std::alloc::Layout;
 use std::collections::HashMap;
 use std::rc::Rc;
+use crate::syscalls::SyscallResponse;
 use crate::typed_value::TypedValue;
 
 pub struct ProcessStartInfo {
@@ -42,7 +43,17 @@ impl ProcessStartInfo {
         }
         Self::prepare_host_machine_resource();
         extern "win64" fn syscall_sync(req: usize) -> usize {
-            return syscalls::syscall_sync(req);
+            let resp= syscalls::syscall_sync(req);
+            // println!("Response raw ptr {:X}",resp);
+            // unsafe {
+            //     (resp as *const SyscallResponse<()>).as_ref().map(|r| {
+            //         println!("Syscall response: size={}, uuid={:X}", r.size, r.request_uuid.as_u128());
+            //         for i in 0..(r.size) as isize {
+            //             println!("{}", ((resp+8+16) as *const u8).offset(i).read_volatile());
+            //         }
+            //     });
+            // }
+            return resp;
         }
         return ProcessStartInfo {
             processId: Self::prepare_process_resource(),

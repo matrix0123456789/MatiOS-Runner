@@ -21,7 +21,7 @@ use windows_sys::Win32::Graphics::Gdi::{CreateSolidBrush, UpdateWindow, Validate
 use windows_sys::Win32::System::Kernel::NULL64;
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetModuleHandleW};
 use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExA, CreateWindowExW, DefWindowProcA, DestroyWindow, DispatchMessageA, GetDesktopWindow, GetMessageA, LoadCursorW, PostQuitMessage, RegisterClassA, RegisterClassExA, RegisterClassExW, RegisterClassW, ShowWindow, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, MINMAXINFO, SW_SHOW, WINDOW_EX_STYLE, WM_CLOSE, WM_GETMINMAXINFO, WNDCLASSA, WNDCLASSEXA, WNDCLASSEXW, WNDCLASSW, WS_BORDER, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_VISIBLE};
-
+use crate::resources::{RESOURCE_BYTE_STREAM_ID, RESOURCE_WINDOW_ID};
 
 #[repr(C)]
 pub struct SyscallRequest<T> {
@@ -39,23 +39,36 @@ pub mod debug;
 mod host_machine;
 pub mod process;
 pub mod resources;
-pub mod syscal_id;
+pub mod syscall_id;
 
 static mut StdOutResourceUuid: Option<Uuid> = None;
 
 pub fn syscall_sync(req: usize) -> usize {
     let request = unsafe { &*(req as *const SyscallRequest<u8>) };
     unsafe {
-        if ((*request).uuid == syscal_id::PRINT_V1) {
+        if ((*request).uuid == syscall_id::PRINT_V1) {
             let requestTyped = unsafe { &*(req as *const SyscallRequest<PrintV1>) };
             print!("{}", requestTyped.payload.text);
-        } 
-        else if ((*request).uuid == syscal_id::CREATE_RESOURCE_V1) {
+        }
+        else if ((*request).uuid == syscall_id::CREATE_RESOURCE_V1) {
             let requestTyped = unsafe { &*(req as *const SyscallRequest<CreateResourceV1>) };
             if ((*requestTyped).payload.resource_type
-                == Uuid::from_u128(0x964cb3b0_a12c_4a0b_ba85_c10cbdd2d416))
+                == RESOURCE_BYTE_STREAM_ID)
             {
-                println!("Hello, world!");
+                StdOutResourceUuid = Some(Uuid::from_u128(1)); //tmp, do random gen
+
+                let response = SyscallResponse {
+                    size: size_of::<CreateResourceV1Response>(),
+                    request_uuid: (*request).uuid.clone(),
+                    payload: CreateResourceV1Response {
+                        uuid: StdOutResourceUuid.clone().unwrap(),
+                    },
+                };
+                return Box::into_raw(Box::from(response)) as usize;
+            }
+            else if ((*requestTyped).payload.resource_type
+                == RESOURCE_WINDOW_ID)
+                        {
                 use windows_sys::{
                     Win32::Foundation::*, Win32::Graphics::Gdi::ValidateRect,
                     Win32::System::LibraryLoader::GetModuleHandleA, Win32::UI::WindowsAndMessaging::*, core::*,
@@ -138,8 +151,8 @@ pub fn syscall_sync(req: usize) -> usize {
                 };
                 return Box::into_raw(Box::from(response)) as usize;
             }
-        } 
-        else if ((*request).uuid == syscal_id::CALL_RESOURCE_METHOD_V1) {
+        }
+        else if ((*request).uuid == syscall_id::CALL_RESOURCE_METHOD_V1) {
             let requestTyped = unsafe { &*(req as *const SyscallRequest<CallResourceMethodV1>) };
             if (StdOutResourceUuid.is_some()
                 && requestTyped.payload.resource == StdOutResourceUuid.clone().unwrap())
@@ -168,8 +181,8 @@ pub fn syscall_sync(req: usize) -> usize {
                     }
                 }
             }
-        } 
-        else if ((*request).uuid == syscal_id::CURRENT_PROCESS_INFO_V1) {
+        }
+        else if ((*request).uuid == syscall_id::CURRENT_PROCESS_INFO_V1) {
             let processId = std::process::id();
             let process = windows_sys::Win32::System::Threading::GetCurrentProcess();
             let sytheticProcessId = 0x30312746_893c_4654_a9b5_000000000000;
@@ -191,8 +204,8 @@ pub fn syscall_sync(req: usize) -> usize {
                 },
             };
             return Box::into_raw(Box::from(response)) as usize;
-        } 
-        else if ((*request).uuid == syscal_id::GET_RESOURCE_INFO_V1) {
+        }
+        else if ((*request).uuid == syscall_id::GET_RESOURCE_INFO_V1) {
             let requestTyped =
                 unsafe { &*(req as *const SyscallRequest<GetResourceInfoV1Request>) };
             let uuid = requestTyped.payload.uuid;
@@ -209,7 +222,7 @@ pub fn syscall_sync(req: usize) -> usize {
             };
 
             return Box::into_raw(Box::from(response)) as usize;
-        } 
+        }
         else {
             println!("Unknow sycall, size: {}", (*request).size);
             println!(
