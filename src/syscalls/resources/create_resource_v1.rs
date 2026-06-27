@@ -3,13 +3,14 @@ use crate::uuid::Uuid;
 use std::boxed::Box;
 use std::string::String;
 use std::vec::Vec;
+#[repr(C)]
 pub struct CreateResourceV1 {
     pub resource_type: Uuid,
     pub owner: Uuid,
     pub tags:Vec<Uuid>,
 
 }
-
+#[repr(C)]
 pub struct CreateResourceV1Response {
     pub uuid: Uuid
 

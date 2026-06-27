@@ -4,11 +4,15 @@ use std::boxed::Box;
 use std::string::String;
 use std::vec::Vec;
 use crate::typed_value::TypedValue;
-
+#[repr(C)]
 pub struct CallResourceMethodV1 {
     pub resource: Uuid,
     pub method: String,
     pub args: TypedValue,
+}
+#[repr(C)]
+pub struct CallResourceMethodV1Response {
+    pub value: TypedValue,
 }
 
 impl CallResourceMethodV1 {

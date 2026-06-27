@@ -1,7 +1,7 @@
 use crate::syscalls::SyscallRequest;
 use crate::uuid::Uuid;
 use std::string::String;
-
+#[repr(C)]
 pub struct PrintV1 {
 
     pub text:String

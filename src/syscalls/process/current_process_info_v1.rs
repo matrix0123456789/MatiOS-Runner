@@ -1,5 +1,5 @@
 use crate::uuid::Uuid;
-
+#[repr(C)]
 pub struct CurrentProcessInfoV1Request {}
 
 #[repr(C)]

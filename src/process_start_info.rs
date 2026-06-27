@@ -3,7 +3,9 @@ use crate::uuid::Uuid;
 use crate::{resource_local_registry, syscalls};
 use core::panic::PanicInfo;
 use std::alloc::Layout;
+use std::collections::HashMap;
 use std::rc::Rc;
+use crate::typed_value::TypedValue;
 
 pub struct ProcessStartInfo {
     processId: Uuid,
@@ -38,6 +40,7 @@ impl ProcessStartInfo {
             };
             return all;
         }
+        Self::prepare_host_machine_resource();
         extern "win64" fn syscall_sync(req: usize) -> usize {
             return syscalls::syscall_sync(req);
         }
@@ -67,6 +70,7 @@ impl ProcessStartInfo {
             };
             return all;
         }
+        Self::prepare_host_machine_resource();
         extern "win64" fn syscall_sync(req: usize) -> usize {
             return syscalls::syscall_sync(req);
         }
@@ -91,12 +95,29 @@ impl ProcessStartInfo {
                     uuid,
                     name: "Process".to_string(),
                     resource_type: Uuid::from_u128(0x541302e1_a401_40b8_8792_16a1fc4a54c5),
+                    methods:HashMap::new()
                 },
             );
         }
         return uuid;
     }
-    // fn prepareHostMachineResource() -> Uuid {
-    //
-    // }
+    fn prepare_host_machine_resource() -> Uuid {
+        let uuid = Uuid::from_u128(0x5ee8f260_9a6e_4efc_b3be_eaef242c4cf0);
+        unsafe {
+            let mut methods:HashMap<String, fn()->TypedValue> = HashMap::new();
+            methods.insert(String::from("getOsVersion"), ||TypedValue::string(String::from(os_version::detect().unwrap().to_string())));
+            methods.insert(String::from("getCpuArchitecture"), ||TypedValue::string(String::from(std::env::consts::ARCH)));
+
+            RESOURCE_LOCAL_REGISTRY.lock().unwrap().insert(
+                uuid,
+                Resource {
+                    uuid,
+                    name: "Host machine".to_string(),
+                    resource_type: Uuid::from_u128(0x7fd422a9_36c6_45c9_b319_704d0c3d6001),
+                    methods,
+                },
+            );
+        }
+        return uuid;
+    }
 }
