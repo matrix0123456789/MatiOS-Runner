@@ -23,3 +23,4 @@ os-version = "0.2.1"
 [[bin]]
 target = "x86_64-pc-windows-gnu"
 name = "MatiOsRunner"
+opt-level = 0

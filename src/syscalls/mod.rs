@@ -11,13 +11,18 @@ use crate::syscalls::resources::get_resource_info_v1::{
 };
 use crate::typed_value::TypedValue;
 use crate::uuid::Uuid;
+use once_cell::race::OnceBox;
+use std::cell::{LazyCell, RefCell};
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr::null;
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use std::thread::JoinHandle;
+use std::time::Duration;
 use windows_sys::core::{PCSTR, PCWSTR};
-use windows_sys::Win32::Foundation::{
-    GetLastError, COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM,
-};
+use windows_sys::Win32::Foundation::{GetLastError, COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection,
     CreateSolidBrush, DeleteDC, EndPaint, GetDC, GetDIBits, ReleaseDC, SelectObject, SetPixel,
@@ -26,6 +31,7 @@ use windows_sys::Win32::Graphics::Gdi::{
 };
 use windows_sys::Win32::System::Kernel::NULL64;
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetModuleHandleW};
+use windows_sys::Win32::System::Threading::Sleep;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExA, CreateWindowExW, DefWindowProcA, DestroyWindow, DispatchMessageA,
     GetDesktopWindow, GetMessageA, LoadCursorW, PostQuitMessage, RegisterClassA, RegisterClassExA,
@@ -55,7 +61,14 @@ pub mod syscall_id;
 
 static mut StdOutResourceUuid: Option<Uuid> = None;
 
-static mut WindowHandle:HWND=0 as HWND;
+static mut WindowHandle: HWND = 0 as HWND;
+static mut WindowThreadPtr: usize = 0;
+static mut channel: LazyCell<(
+    Sender<Box<dyn FnOnce() + Send>>,
+    Receiver<Box<dyn FnOnce() + Send>>,
+)> = LazyCell::new(|| mpsc::channel::<Box<dyn FnOnce() + Send>>());
+
+static mut lastWindowContent:TypedValue=TypedValue::null();
 
 pub fn syscall_sync(req: usize) -> usize {
     let request = unsafe { &*(req as *const SyscallRequest<u8>) };
@@ -97,122 +110,207 @@ pub fn syscall_sync(req: usize) -> usize {
                     Win32::System::LibraryLoader::GetModuleHandleA,
                     Win32::UI::WindowsAndMessaging::*,
                 };
+                let window_thread = thread::spawn(|| {
+                    extern "system" fn wndproc(
+                        window: HWND,
+                        message: u32,
+                        wparam: WPARAM,
+                        lparam: LPARAM,
+                    ) -> LRESULT {
+                        unsafe {
+                            match message {
+                                WM_PAINT => {
+                                    println!("WM_PAINT");
+                                    if(lastWindowContent.value_type==13) {
+                                        let structure = lastWindowContent.get_as_structure();
+                                        let structure2 = lastWindowContent.get_as_structure();
+                                        println!("WM_PAINT, structure: {}", structure2.len());
+                                        if(structure.get("pixels").is_some()){
+                                        let mut pixels = lastWindowContent.get_as_structure().get("pixels").unwrap().get_as_u64();
 
-                extern "system" fn wndproc(
-                    window: HWND,
-                    message: u32,
-                    wparam: WPARAM,
-                    lparam: LPARAM,
-                ) -> LRESULT {
-                    unsafe {
-                        match message {
-                            WM_PAINT => {
-                                println!("WM_PAINT");
-                                ValidateRect(window, std::ptr::null());
-                                0
+                                        let dc = GetDC(WindowHandle);
+
+                                        let mut pixels2 = 0 as *mut _;
+                                        let mut buf = 0 as *mut c_void;
+                                        let mut bitmapinfo = BITMAPINFO {
+                                            bmiHeader: BITMAPINFOHEADER {
+                                                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                                                biWidth: 50 as i32,
+                                                biHeight: 50 as i32,
+                                                biPlanes: 1,
+                                                biBitCount: 32,
+                                                biCompression: BI_RGB,
+                                                ..Default::default()
+                                            },
+                                            ..Default::default()
+                                        };
+                                        let dibSection = CreateDIBSection(
+                                            dc,
+                                            &mut bitmapinfo,
+                                            DIB_RGB_COLORS,
+                                            //(pixels_ptr) as usize as *mut *mut _,
+                                            &mut pixels2,
+                                            0 as HANDLE,
+                                            0,
+                                        );
+                                        (pixels2 as *mut u32)
+                                            .copy_from(pixels as *mut u32, (50 * 50) as usize);
+                                        let hdcMemory = CreateCompatibleDC(dc);
+
+                                        let mut ps: PAINTSTRUCT = Default::default();
+                                        let hdc = BeginPaint(WindowHandle, &mut ps);
+                                        let memdc = CreateCompatibleDC(hdc);
+                                        SelectObject(memdc, dibSection);
+
+                                        BitBlt(hdc, 100, 200, 50 as i32, 50 as i32, memdc, 0, 0, SRCCOPY);
+                                        DeleteDC(memdc);
+                                        EndPaint(WindowHandle, &ps);
+                                        ReleaseDC(WindowHandle, dc);
+                                        ValidateRect(window, std::ptr::null());
+                                    }}
+                                    0
+                                }
+                                WM_DESTROY => {
+                                    println!("WM_DESTROY");
+                                    PostQuitMessage(0);
+                                    0
+                                }
+                                _ => DefWindowProcA(window, message, wparam, lparam),
                             }
-                            WM_DESTROY => {
-                                println!("WM_DESTROY");
-                                PostQuitMessage(0);
-                                0
-                            }
-                            _ => DefWindowProcA(window, message, wparam, lparam),
                         }
                     }
-                }
 
-                let instance = GetModuleHandleA(std::ptr::null());
-                debug_assert!(!instance.is_null());
+                    let instance = GetModuleHandleA(std::ptr::null());
+                    debug_assert!(!instance.is_null());
 
-                let window_class = s!("window");
+                    let window_class = s!("window");
 
-                let wc = WNDCLASSA {
-                    hCursor: LoadCursorW(core::ptr::null_mut(), IDC_ARROW),
-                    hInstance: instance,
-                    lpszClassName: window_class,
-                    style: CS_HREDRAW | CS_VREDRAW,
-                    lpfnWndProc: Some(wndproc),
-                    cbClsExtra: 0,
-                    cbWndExtra: 0,
-                    hIcon: core::ptr::null_mut(),
-                    hbrBackground: core::ptr::null_mut(),
-                    lpszMenuName: std::ptr::null(),
-                };
+                    let wc = WNDCLASSA {
+                        hCursor: LoadCursorW(core::ptr::null_mut(), IDC_ARROW),
+                        hInstance: instance,
+                        lpszClassName: window_class,
+                        style:  CS_VREDRAW,
+                        lpfnWndProc: Some(wndproc),
+                        cbClsExtra: 0,
+                        cbWndExtra: 0,
+                        hIcon: core::ptr::null_mut(),
+                        hbrBackground: core::ptr::null_mut(),
+                        lpszMenuName: std::ptr::null(),
+                    };
 
-                let atom = RegisterClassA(&wc);
-                debug_assert!(atom != 0);
+                    let atom = RegisterClassA(&wc);
+                    debug_assert!(atom != 0);
 
-                let window_handle = CreateWindowExA(
-                    0,
-                    window_class,
-                    s!("This is a sample window"),
-                    WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-                    CW_USEDEFAULT,
-                    CW_USEDEFAULT,
-                    CW_USEDEFAULT,
-                    CW_USEDEFAULT,
-                    core::ptr::null_mut(),
-                    core::ptr::null_mut(),
-                    instance,
-                    std::ptr::null(),
-                );
-                WindowHandle=window_handle;
+                    let window_handle = CreateWindowExA(
+                        0,
+                        window_class,
+                        s!("This is a sample window"),
+                        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                        CW_USEDEFAULT,
+                        CW_USEDEFAULT,
+                        CW_USEDEFAULT,
+                        CW_USEDEFAULT,
+                        core::ptr::null_mut(),
+                        core::ptr::null_mut(),
+                        instance,
+                        std::ptr::null(),
+                    );
+                    WindowHandle = window_handle;
 
-                // let mut message = std::mem::zeroed();
+                    // Sleep(1000000);
+                    let mut message = std::mem::zeroed();
 
-                // while GetMessageA(&mut message, core::ptr::null_mut(), 0, 0) != 0 {
-                //     DispatchMessageA(&message);
-                // }
-
-
+                     while GetMessageA(&mut message, core::ptr::null_mut(), 0, 0) != 0 {
+                         DispatchMessageA(&message);
+                     }
+                    // while let Ok(job) = channel.1.recv() {
+                    //     job(); // wykonaj wstrzyknięty kod
+                    // }
+                });
+                WindowThreadPtr = Box::into_raw(Box::from(window_thread)) as usize;
                 let windowId = Some(Uuid::from_u128(101)); //tmp, do random gen
 
                 let mut methods: HashMap<String, fn(TypedValue) -> TypedValue> = HashMap::new();
                 methods.insert("writeBitmapBuffer".to_string(), |x| {
-                    let dc = GetDC(WindowHandle);
-
-                    let mut buf = 0 as *mut c_void;
-                    let mut bitmapinfo = BITMAPINFO {
-                        bmiHeader: BITMAPINFOHEADER {
-                            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                            biWidth: 720,
-                            biHeight: 480,
-                            biPlanes: 1,
-                            biBitCount: 32,
-                            biCompression: BI_RGB,
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    };
-                    let mut pixels = 0 as *mut _;
-                    let bufPtr = Box::into_raw(Box::new(buf));
-                    let dibSection = CreateDIBSection(
-                        dc,
-                        &mut bitmapinfo,
-                        DIB_RGB_COLORS,
-                        &mut pixels,
-                        0 as HANDLE,
-                        0,
-                    );
-                    for i in 0..480 {
-                        for j in 0..720 {
-                            unsafe { (pixels as *mut u32).offset(i * 720 + j).write_volatile((0xFF0000FF)) };
-                        }
+                    unsafe{
+                        lastWindowContent=x.clone();
                     }
-                    // GetDIBits(dc, tmp, 0, 480, pixels, &mut bitmapinfo, DIB_RGB_COLORS);
-                    let hdcMemory = CreateCompatibleDC(dc);
 
-                    let mut ps: PAINTSTRUCT = Default::default();
-                    let hdc = BeginPaint(WindowHandle, &mut ps);
-
-                    let memdc = CreateCompatibleDC(hdc);
-                    SelectObject(memdc, dibSection);
-
-                    BitBlt(hdc, 0, 0, 720, 480, memdc, 0, 0, SRCCOPY);
-
-                    DeleteDC(memdc);
-                    EndPaint(WindowHandle, &ps);
-                    ReleaseDC(WindowHandle, dc);
+                    // channel.0.send(Box::from(move || {
+                    //     // let box2=Box::from_raw(WindowThreadPtr as *mut JoinHandle<()>);
+                    //     // box2.thread().dis
+                    //     let xMap = x.get_as_structure();
+                    //     let width = xMap.get("width").unwrap().get_as_u64();
+                    //     let height = xMap.get("height").unwrap().get_as_u64();
+                    //     let mut pixels = xMap.get("pixels").unwrap().get_as_u64();
+                    //     let pixels_ptr = Box::into_raw(Box::new(pixels)) as *mut *mut u32;
+                    //
+                    //     // SetWindowPos(
+                    //     //     WindowHandle,
+                    //     //     core::ptr::null_mut(),
+                    //     //     0,
+                    //     //     0,
+                    //     //     width as i32,
+                    //     //     height as i32,
+                    //     //     0,
+                    //     // );
+                    //     let err = GetLastError();
+                    //
+                    //     let dc = GetDC(WindowHandle);
+                    //
+                    //     let mut buf = 0 as *mut c_void;
+                    //     let mut bitmapinfo = BITMAPINFO {
+                    //         bmiHeader: BITMAPINFOHEADER {
+                    //             biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    //             biWidth: width as i32,
+                    //             biHeight: height as i32,
+                    //             biPlanes: 1,
+                    //             biBitCount: 32,
+                    //             biCompression: BI_RGB,
+                    //             ..Default::default()
+                    //         },
+                    //         ..Default::default()
+                    //     };
+                    //     let mut pixels2 = 0 as *mut _;
+                    //     let bufPtr = Box::into_raw(Box::new(buf));
+                    //     let dibSection = CreateDIBSection(
+                    //         dc,
+                    //         &mut bitmapinfo,
+                    //         DIB_RGB_COLORS,
+                    //         //(pixels_ptr) as usize as *mut *mut _,
+                    //         &mut pixels2,
+                    //         0 as HANDLE,
+                    //         0,
+                    //     );
+                    //     (pixels2 as *mut u32)
+                    //         .copy_from(pixels as *mut u32, (width * height) as usize);
+                    //     // GetDIBits(dc, tmp, 0, 480, pixels, &mut bitmapinfo, DIB_RGB_COLORS);
+                    //     let hdcMemory = CreateCompatibleDC(dc);
+                    //
+                    //     let mut ps: PAINTSTRUCT = Default::default();
+                    //     let hdc = BeginPaint(WindowHandle, &mut ps);
+                    //
+                    //     let err2 = GetLastError();
+                    //     let memdc = CreateCompatibleDC(hdc);
+                    //     SelectObject(memdc, dibSection);
+                    //
+                    //     BitBlt(hdc, 0, 0, width as i32, height as i32, memdc, 0, 0, SRCCOPY);
+                    //
+                    //     let err3 = GetLastError();
+                    //
+                    //     DeleteDC(memdc);
+                    //     EndPaint(WindowHandle, &ps);
+                    //     ReleaseDC(WindowHandle, dc);
+                    //     ValidateRect(WindowHandle, &RECT{
+                    //         left:0,
+                    //         top:0,
+                    //         right:width as i32,
+                    //         bottom:height as i32
+                    //     });
+                    //     let mut message = std::mem::zeroed();
+                    //     GetMessageA(&mut message, core::ptr::null_mut(), 0, 0);
+                    //     DispatchMessageA(&message);
+                    // }));
                     return TypedValue::null();
                 });
 
