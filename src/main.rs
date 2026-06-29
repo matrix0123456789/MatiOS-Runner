@@ -26,6 +26,7 @@ pub mod syscalls;
 pub mod typed_value;
 pub mod uuid;
 pub mod resources;
+pub mod bitmap;
 
 fn main() -> Result<(), std::io::Error> {
     {
