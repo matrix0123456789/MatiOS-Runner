@@ -5,7 +5,7 @@ pub struct TypedValue {
     pub value: usize,
 }
 impl TypedValue {
-    pub fn null(value: bool) -> TypedValue {
+    pub fn null() -> TypedValue {
         TypedValue {
             value_type: 0,
             value: 0,
@@ -70,13 +70,21 @@ impl TypedValue {
     pub fn uuid(value: Uuid) -> TypedValue {
         TypedValue {
             value_type: 10,
-            value: unsafe{Box::into_raw(Box::from(value)) as *const u8 as usize},
+            value: unsafe { Box::into_raw(Box::from(value)) as *const u8 as usize },
         }
     }
     pub fn string(value: String) -> TypedValue {
         TypedValue {
             value_type: 11,
-            value: unsafe{Box::into_raw(Box::from(value)) as *const String as usize},
+            value: unsafe { Box::into_raw(Box::from(value)) as *const String as usize },
         }
+    }
+}
+impl Clone for TypedValue {
+    fn clone(&self) -> Self {
+        return Self {
+            value_type: self.value_type,
+            value: self.value,
+        };
     }
 }

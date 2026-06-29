@@ -16,5 +16,5 @@ pub struct Resource {
     pub uuid: Uuid,
     pub resource_type: Uuid,
     pub name: String,
-    pub methods: HashMap<String, fn()->TypedValue>
+    pub methods: HashMap<String, fn(TypedValue)->TypedValue>
 }

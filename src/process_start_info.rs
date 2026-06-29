@@ -115,9 +115,9 @@ impl ProcessStartInfo {
     fn prepare_host_machine_resource() -> Uuid {
         let uuid = Uuid::from_u128(0x5ee8f260_9a6e_4efc_b3be_eaef242c4cf0);
         unsafe {
-            let mut methods:HashMap<String, fn()->TypedValue> = HashMap::new();
-            methods.insert(String::from("getOsVersion"), ||TypedValue::string(String::from(os_version::detect().unwrap().to_string())));
-            methods.insert(String::from("getCpuArchitecture"), ||TypedValue::string(String::from(std::env::consts::ARCH)));
+            let mut methods:HashMap<String, fn(TypedValue)->TypedValue> = HashMap::new();
+            methods.insert(String::from("getOsVersion"), |_|TypedValue::string(String::from(os_version::detect().unwrap().to_string())));
+            methods.insert(String::from("getCpuArchitecture"), |_|TypedValue::string(String::from(std::env::consts::ARCH)));
 
             RESOURCE_LOCAL_REGISTRY.lock().unwrap().insert(
                 uuid,
