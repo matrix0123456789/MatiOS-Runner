@@ -18,15 +18,15 @@ use std::ptr::read_volatile;
 use std::rc::Rc;
 use std::{env, mem, process};
 
+pub mod bitmap;
 mod elf_parser;
 pub mod host_machine;
 pub mod process_start_info;
 pub mod resource_local_registry;
+pub mod resources;
 pub mod syscalls;
 pub mod typed_value;
 pub mod uuid;
-pub mod resources;
-pub mod bitmap;
 
 fn main() -> Result<(), std::io::Error> {
     {
@@ -95,16 +95,21 @@ fn loadExecutable(filePath: String) -> extern "win64" fn(*mut ProcessStartInfo) 
     }
     let mut text_offset = 0;
     let mut allocated_memory = vec![0 as u8; (end - start) as usize];
-    for section in sections {
+    for section in sections.iter() {
         if ((section.header.sh_flags & 0x02) > 0) {
             let offset = section.header.sh_addr as usize - start as usize;
             let size = section.header.sh_size as usize;
             allocated_memory[offset..offset + size].copy_from_slice(&section.data);
-            if (section.name == ".text") {
+            if (section.name == ".text_start") {
                 text_offset = offset;
             }
+            println!(
+                "Loaded section {} at offset {:x} with size {:x} and flags {:x} and type {:x}",
+                section.name, offset, size, section.header.sh_flags, section.header.sh_type
+            );
         }
     }
+
 
     use windows_sys::Win32::System::Memory::{
         VirtualAlloc, MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READWRITE,
@@ -128,7 +133,27 @@ fn loadExecutable(filePath: String) -> extern "win64" fn(*mut ProcessStartInfo) 
             allocated_memory.len(),
         );
     }
-
+    for section in sections.iter() {
+        if (section.header.sh_type == 4) {
+            println!("RELA section");
+            let datau64: Vec<u64> = unsafe { std::mem::transmute(section.data.clone()) };
+            for i in 0..(section.header.sh_size / 8 / 3) as usize {
+                unsafe {
+                    let r_offset = datau64[i * 3];
+                    let r_info = datau64[i * 3 + 1];
+                    let r_addend = datau64[i * 3 + 2];
+                    (buffer_executable as *mut u64).byte_offset(r_offset as isize).write_volatile(
+                        buffer_executable as u64 + r_addend
+                    );
+                }
+            }
+        }
+        if (section.header.sh_type == 9) {
+            println!("REL section")
+        }
+    }
+    print!("buffer_executable: {:p}\n", buffer_executable);
+    print!("text_offset: {:x}\n", text_offset);
     let function_pointer: extern "win64" fn(*mut ProcessStartInfo) -> u64 = unsafe {
         std::mem::transmute::<*mut u8, extern "win64" fn(*mut ProcessStartInfo) -> u64>(
             (buffer_executable.byte_offset(text_offset as isize)),

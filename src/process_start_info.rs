@@ -8,6 +8,7 @@ use std::rc::Rc;
 use crate::syscalls::SyscallResponse;
 use crate::typed_value::TypedValue;
 
+#[repr(C)]
 pub struct ProcessStartInfo {
     processId: Uuid,
     debugPrint: extern "win64" fn(&str),

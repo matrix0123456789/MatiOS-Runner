@@ -119,7 +119,7 @@ pub fn syscall_sync(req: usize) -> usize {
                         unsafe {
                             match message {
                                 WM_PAINT  => {
-                                    println!("WM_PAINT");
+                                    // println!("WM_PAINT");
                                     if (lastWindowContent.contains_key("pixels")) {
                                         let mut pixels =
                                             lastWindowContent.get("pixels").unwrap().get_as_u64();
