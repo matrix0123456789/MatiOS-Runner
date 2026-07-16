@@ -1,5 +1,5 @@
 use crate::resource_local_registry::{Resource, RESOURCE_LOCAL_REGISTRY};
-use crate::resources::{RESOURCE_BYTE_STREAM_ID, RESOURCE_WINDOW_ID};
+use crate::resources::{RESOURCE_BYTE_STREAM_ID, RESOURCE_DESKTOP_ID, RESOURCE_WINDOW_ID};
 use crate::syscalls::debug::print_v1::PrintV1;
 use crate::syscalls::process::current_process_info_v1::CurrentProcessInfoV1Response;
 use crate::syscalls::resources::call_resource_method_v1::{
@@ -38,6 +38,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 use windows_sys::{s, w};
 use crate::bitmap::Color;
+use crate::syscalls::resources::request_resource_v1::{RequestResourceV1, RequestResourceV1Response};
 
 #[repr(C)]
 pub struct SyscallRequest<T> {
@@ -103,7 +104,8 @@ pub fn syscall_sync(req: usize) -> usize {
                     },
                 };
                 return Box::into_raw(Box::from(response)) as usize;
-            } else if ((*requestTyped).payload.resource_type == RESOURCE_WINDOW_ID) {
+            }
+            else if ((*requestTyped).payload.resource_type == RESOURCE_WINDOW_ID) {
                 use windows_sys::{
                     core::*, Win32::Foundation::*, Win32::Graphics::Gdi::ValidateRect,
                     Win32::System::LibraryLoader::GetModuleHandleA,
@@ -278,6 +280,36 @@ pub fn syscall_sync(req: usize) -> usize {
                     request_uuid: (*request).uuid.clone(),
                     payload: CreateResourceV1Response {
                         uuid: windowId.clone().unwrap(),
+                    },
+                };
+                return Box::into_raw(Box::from(response)) as usize;
+            }
+        } else if ((*request).uuid == syscall_id::REQUEST_RESOURCE_V1) {
+            let requestTyped = unsafe { &*(req as *const SyscallRequest<RequestResourceV1>) };
+            if ((*requestTyped).payload.resource_type == RESOURCE_DESKTOP_ID){
+                let desktopId = Some(Uuid::from_u128(0x1000000001)); //tmp, do random gen
+                let mut methods: HashMap<String, fn(TypedValue) -> TypedValue> = HashMap::new();
+                methods.insert("getWindows".to_string(), |text| {
+                    println!("getWindows");
+
+                    TypedValue::null()
+                });
+                let mut registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
+                registry.insert(
+                    StdOutResourceUuid.clone().unwrap(),
+                    Resource {
+                        uuid: desktopId.clone().unwrap(),
+                        resource_type: RESOURCE_DESKTOP_ID,
+                        name: "Desktop".to_string(),
+                        methods,
+                    },
+                );
+
+                let response = SyscallResponse {
+                    size: size_of::<RequestResourceV1Response>(),
+                    request_uuid: (*request).uuid.clone(),
+                    payload: RequestResourceV1Response {
+                        uuid: desktopId.clone().unwrap(),
                     },
                 };
                 return Box::into_raw(Box::from(response)) as usize;

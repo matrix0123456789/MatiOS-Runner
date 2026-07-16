@@ -5,3 +5,4 @@ pub const RESOURCE_BYTE_STREAM_TAG_STDERR:crate::uuid::Uuid=crate::uuid::Uuid::f
 
 
 pub const RESOURCE_WINDOW_ID:crate::uuid::Uuid=crate::uuid::Uuid::from_u128(0xf15e18c_bcbc_48da_95ed_f41c093bc849);
+pub const RESOURCE_DESKTOP_ID:crate::uuid::Uuid=crate::uuid::Uuid::from_u128(0xe2e95ac2_c619_4767_8194_90e817fb3646);
