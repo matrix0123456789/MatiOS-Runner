@@ -38,3 +38,11 @@ jobs:
       with:
         name: matiosshell
         path: result
+    - name: Upload binaries to release
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: result/windows_x64/MatiOsRunner.exe
+        asset_name: MatiOsRunner.exe
+        tag: ${{ github.ref }}
+        overwrite: true
