@@ -17,6 +17,8 @@ use std::ops::{Deref, DerefMut};
 use std::ptr::read_volatile;
 use std::rc::Rc;
 use std::{env, mem, process};
+use crate::resources::desktop::prepare_current_desktop;
+use crate::resources::files::prepare_filesystem;
 
 pub mod bitmap;
 mod elf_parser;
@@ -33,11 +35,20 @@ fn main() -> Result<(), std::io::Error> {
         let mut filePath = String::new();
         let mut args: Vec<String> = env::args().collect();
         let mut verbose = true; //tmp true, change to false
+        let mut load_local_environment = false;
         for i in 0..args.len() {
             let arg = &args[i];
             if arg == "--verbose" || arg == "-V" {
                 verbose = true;
                 println!("Verbose mode enabled");
+                args.remove(i);
+                break;
+            }
+        }
+        for i in 0..args.len() {
+            let arg = &args[i];
+            if arg == "--localEnvironment" || arg == "-L" {
+                load_local_environment = true;
                 args.remove(i);
                 break;
             }
@@ -58,6 +69,11 @@ fn main() -> Result<(), std::io::Error> {
             info = ProcessStartInfo::getVerboseInfo();
         } else {
             info = ProcessStartInfo::getInfo();
+        }
+
+        if load_local_environment {
+            prepare_current_desktop();
+            prepare_filesystem();
         }
         let infoPrtr = Box::into_raw(Box::from(info));
         let ret = function_pointer(infoPrtr);
@@ -110,7 +126,6 @@ fn loadExecutable(filePath: String) -> extern "win64" fn(*mut ProcessStartInfo) 
         }
     }
 
-
     use windows_sys::Win32::System::Memory::{
         VirtualAlloc, MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READWRITE,
     };
@@ -142,9 +157,9 @@ fn loadExecutable(filePath: String) -> extern "win64" fn(*mut ProcessStartInfo) 
                     let r_offset = datau64[i * 3];
                     let r_info = datau64[i * 3 + 1];
                     let r_addend = datau64[i * 3 + 2];
-                    (buffer_executable as *mut u64).byte_offset(r_offset as isize).write_volatile(
-                        buffer_executable as u64 + r_addend
-                    );
+                    (buffer_executable as *mut u64)
+                        .byte_offset(r_offset as isize)
+                        .write_volatile(buffer_executable as u64 + r_addend);
                 }
             }
         }

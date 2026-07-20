@@ -5,4 +5,5 @@ pub const CREATE_RESOURCE_V1: Uuid = Uuid::from_u128(0xb2828475_e770_4bdc_86e0_6
 pub const REQUEST_RESOURCE_V1: Uuid = Uuid::from_u128(0x621e666e_fedb_42b2_8817_3df5780d9d0b);
 pub const GET_RESOURCE_INFO_V1: Uuid = Uuid::from_u128(0xf60347f7_c312_48c2_9db4_0b5efb60db08);
 pub const CALL_RESOURCE_METHOD_V1: Uuid = Uuid::from_u128(0xbce7baa2_c3e2_4f7f_9d42_42c94065f5f0);
+pub const GET_RESOURCE_BY_PATH_V1: Uuid = Uuid::from_u128(0xdc593373_ed16_40c1_a33b_44db7a0e483b);
 pub const CURRENT_PROCESS_INFO_V1:Uuid = Uuid::from_u128(0x6ac0d646_72dc_4fe4_9fdc_f944f1a61491);

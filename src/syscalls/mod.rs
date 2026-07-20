@@ -1,12 +1,18 @@
 use crate::bitmap::Color;
 use crate::resource_local_registry::{Resource, RESOURCE_LOCAL_REGISTRY};
-use crate::resources::{RESOURCE_BYTE_STREAM_ID, RESOURCE_BYTE_STREAM_TAG_STDIN, RESOURCE_BYTE_STREAM_TAG_STDOUT, RESOURCE_DESKTOP_ID, RESOURCE_WINDOW_ID};
+use crate::resources::{
+    get_resource_by_path, RESOURCE_BYTE_STREAM_ID, RESOURCE_BYTE_STREAM_TAG_STDIN,
+    RESOURCE_BYTE_STREAM_TAG_STDOUT, RESOURCE_DESKTOP_ID, RESOURCE_WINDOW_ID,
+};
 use crate::syscalls::debug::print_v1::PrintV1;
 use crate::syscalls::process::current_process_info_v1::CurrentProcessInfoV1Response;
 use crate::syscalls::resources::call_resource_method_v1::{
     CallResourceMethodV1, CallResourceMethodV1Response,
 };
 use crate::syscalls::resources::create_resource_v1::{CreateResourceV1, CreateResourceV1Response};
+use crate::syscalls::resources::get_resource_by_path::{
+    GetResourceByPathV1Request, GetResourceByPathV1Response,
+};
 use crate::syscalls::resources::get_resource_info_v1::{
     GetResourceInfoV1Request, GetResourceInfoV1Response,
 };
@@ -19,13 +25,13 @@ use once_cell::race::OnceBox;
 use std::cell::{LazyCell, RefCell};
 use std::collections::HashMap;
 use std::ffi::c_void;
+use std::io::{Read, Write};
 use std::ptr::null;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, Mutex};
-use std::{io, thread};
-use std::io::{Read, Write};
 use std::thread::JoinHandle;
 use std::time::Duration;
+use std::{io, thread};
 use windows_sys::core::{BOOL, PCSTR, PCWSTR};
 use windows_sys::Win32::Foundation::{
     GetLastError, COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM,
@@ -97,20 +103,19 @@ pub fn syscall_sync(req: usize) -> usize {
                     StdOutResourceUuid = Some(Uuid::from_u128(1)); //tmp, do random gen
                     let mut methods: HashMap<String, fn(TypedValue) -> TypedValue> = HashMap::new();
                     methods.insert("write".to_string(), |text| {
-                                                let strBytes = (*(text.value as *const String)).as_bytes();
+                        let strBytes = (*(text.value as *const String)).as_bytes();
                         console::Term::stdout().write(strBytes);
                         console::Term::stdout().flush();
                         TypedValue::null()
                     });
-                    let mut registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
-                    registry.insert(
+                    RESOURCE_LOCAL_REGISTRY.lock().unwrap().insert(
                         StdOutResourceUuid.clone().unwrap(),
-                        Resource {
+                        Arc::new(Resource {
                             uuid: StdOutResourceUuid.clone().unwrap(),
                             resource_type: RESOURCE_BYTE_STREAM_ID,
                             name: "StdOut".to_string(),
-                            methods,
-                        },
+                            methods,..Default::default()
+                        }),
                     );
 
                     let response = SyscallResponse {
@@ -133,15 +138,14 @@ pub fn syscall_sync(req: usize) -> usize {
                         let string = String::from(char);
                         return TypedValue::string(string.to_string());
                     });
-                    let mut registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
-                    registry.insert(
+                    RESOURCE_LOCAL_REGISTRY.lock().unwrap().insert(
                         StdInResourceUuid.clone().unwrap(),
-                        Resource {
+                        Arc::new(Resource {
                             uuid: StdInResourceUuid.clone().unwrap(),
                             resource_type: RESOURCE_BYTE_STREAM_ID,
                             name: "StdIn".to_string(),
-                            methods,
-                        },
+                            methods,..Default::default()
+                        }),
                     );
 
                     let response = SyscallResponse {
@@ -329,15 +333,15 @@ pub fn syscall_sync(req: usize) -> usize {
                     return TypedValue::null();
                 });
 
-                let mut registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
-                registry.insert(
+                RESOURCE_LOCAL_REGISTRY.lock().unwrap().insert(
                     windowId.clone().unwrap(),
-                    Resource {
+                    Arc::new(Resource {
                         uuid: windowId.clone().unwrap(),
                         resource_type: RESOURCE_WINDOW_ID,
                         name: "Window".to_string(),
                         methods,
-                    },
+                        ..Default::default()
+                    }),
                 );
                 let response = SyscallResponse {
                     size: size_of::<CreateResourceV1Response>(),
@@ -352,74 +356,13 @@ pub fn syscall_sync(req: usize) -> usize {
             let requestTyped = unsafe { &*(req as *const SyscallRequest<RequestResourceV1>) };
             if ((*requestTyped).payload.resource_type == RESOURCE_DESKTOP_ID) {
                 let desktopId = Some(Uuid::from_u128(0x70000000007)); //tmp, do random gen
-                let mut methods: HashMap<String, fn(TypedValue) -> TypedValue> = HashMap::new();
-                methods.insert("getWindows".to_string(), |text| {
-                    println!("getWindows");
-                    let mut windowsList: Box<Vec<TypedValue>> = Box::from(Vec::new());
-                    unsafe extern "system" fn enum_windows_callback(
-                        hwnd: HWND,
-                        lparam: LPARAM,
-                    ) -> BOOL {
-                        let mut windowsList = Box::from_raw(lparam as *mut Vec<TypedValue>);
-                        let mut rect = RECT::default();
-                        let aa = GetWindowRect(hwnd, &mut rect);
-                        println!(
-                            "GetWindowRect: {}, {}, {}, {}",
-                            rect.top, rect.left, rect.bottom, rect.right
-                        );
 
-                        let mut buffer = vec![0u16; 256];
-                        let written = GetClassNameW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32);
-
-                        let className =
-                            String::from_utf16_lossy(&buffer[..written.max(0) as usize]);
-                        println!("className: {}", className);
-
-                        let len = GetWindowTextLengthW(hwnd);
-                        let mut buffer2 = vec![0u16; (len.max(0) as usize) + 1];
-                        let written =
-                            GetWindowTextW(hwnd, buffer2.as_mut_ptr(), buffer2.len() as i32);
-
-                        let windowName =
-                            String::from_utf16_lossy(&buffer2[..written.max(0) as usize]);
-                        println!("windowName: {}", windowName);
-
-                        windowsList.push(TypedValue::structure(&[
-                            KeyedTypedValue::from(
-                                "className".to_string(),
-                                TypedValue::string(className),
-                            ),
-                            KeyedTypedValue::from(
-                                "windowName".to_string(),
-                                TypedValue::string(windowName),
-                            ),
-                        ]));
-
-                        1
-                    }
-                    let windowsListRaw = Box::into_raw(windowsList);
-                    let windowsListCopy = Box::from_raw(windowsListRaw);
-                    unsafe {
-                        EnumWindows(Some(enum_windows_callback), windowsListRaw as LPARAM);
-                    }
-                    TypedValue::vector(windowsListCopy.as_slice())
-                });
-                let mut registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
-                registry.insert(
-                    desktopId.clone().unwrap(),
-                    Resource {
-                        uuid: desktopId.clone().unwrap(),
-                        resource_type: RESOURCE_DESKTOP_ID,
-                        name: "Desktop".to_string(),
-                        methods,
-                    },
-                );
-
+                let resource = RESOURCE_LOCAL_REGISTRY.lock().unwrap().get(&desktopId.clone().unwrap()).unwrap();
                 let response = SyscallResponse {
                     size: size_of::<RequestResourceV1Response>(),
                     request_uuid: (*request).uuid.clone(),
                     payload: RequestResourceV1Response {
-                        uuid: desktopId.clone().unwrap(),
+                        uuid: resource.uuid,
                     },
                 };
                 return Box::into_raw(Box::from(response)) as usize;
@@ -479,11 +422,34 @@ pub fn syscall_sync(req: usize) -> usize {
             let resource = registry.get(&uuid).unwrap();
 
             let response = SyscallResponse {
-                size: size_of::<GetResourceInfoV1Request>(),
+                size: size_of::<GetResourceInfoV1Response>(),
                 request_uuid: (*request).uuid.clone(),
                 payload: GetResourceInfoV1Response {
                     uuid: (&resource).uuid,
+                    name: (&resource).name.clone(),
+                    resource_type:(&resource).resource_type,
+                    tags: (&resource).tags.clone(),
                     methods: resource.methods.keys().map(|x| x.clone()).collect(),
+                    connected_resources: (&resource).connected_resources.iter().map(|x| x.uuid).collect(),
+                },
+            };
+
+            return Box::into_raw(Box::from(response)) as usize;
+        } else if ((*request).uuid == syscall_id::GET_RESOURCE_BY_PATH_V1) {
+            let requestTyped =
+                unsafe { &*(req as *const SyscallRequest<GetResourceByPathV1Request>) };
+
+            let resource = get_resource_by_path(requestTyped.payload.path.clone());
+
+            let response = SyscallResponse {
+                size: size_of::<GetResourceByPathV1Response>(),
+                request_uuid: (*request).uuid.clone(),
+                payload: GetResourceByPathV1Response {
+                    uuid: if (resource.is_some()) {
+                        resource.unwrap().uuid
+                    } else {
+                        Uuid::from_u128(0)
+                    },
                 },
             };
 

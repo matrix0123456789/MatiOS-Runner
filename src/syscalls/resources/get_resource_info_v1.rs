@@ -11,7 +11,11 @@ pub struct GetResourceInfoV1Request {
 #[repr(C)]
 pub struct GetResourceInfoV1Response {
     pub uuid: Uuid,
-    pub methods:vec::Vec<String>
+    pub methods:vec::Vec<String>,
+    pub name: String,
+    pub resource_type: Uuid,
+    pub tags: vec::Vec<Uuid>,
+    pub connected_resources: vec::Vec<Uuid>,
 }
 impl GetResourceInfoV1Request {
     pub fn create(uuid: Uuid) -> Box<SyscallRequest<Self>> {
