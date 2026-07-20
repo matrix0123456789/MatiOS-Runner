@@ -21,10 +21,18 @@ jobs:
          sudo apt-get install gcc-mingw-w64-x86-64 -y
     - run:
          rustup target add x86_64-pc-windows-gnu
-    - name: Build
-      run: cargo build --package MatiOsRunner --bin MatiOsRunner --target x86_64-pc-windows-gnu
+    - name: Build windows
+      run: cargo build --release --package MatiOsRunner --bin MatiOsRunner --target x86_64-pc-windows-gnu
+    - name: Make result directory
+      run: mkdir result
+    - name: Copy windows
+      run: cp target/x86_64-pc-windows-gnu/release/MatiOsRunner.exe result/MatiOsRunner.exe
+    - name: Build linux
+      run: cargo build --release --package MatiOsRunner --bin MatiOsRunner --target x86_64-pc-linux-gnu
+    - name: Copy linux
+      run: cp target/x86_64-pc-linux-gnu/release/MatiOsRunner result/MatiOsRunner
     - name: Upload
       uses: actions/upload-artifact@v7
       with:
         name: matiosshell
-        path: target/x86_64-pc-windows-gnu/debug/MatiOsRunner.exe
+        path: result
