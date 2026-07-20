@@ -357,7 +357,8 @@ pub fn syscall_sync(req: usize) -> usize {
             if ((*requestTyped).payload.resource_type == RESOURCE_DESKTOP_ID) {
                 let desktopId = Some(Uuid::from_u128(0x70000000007)); //tmp, do random gen
 
-                let resource = RESOURCE_LOCAL_REGISTRY.lock().unwrap().get(&desktopId.clone().unwrap()).unwrap();
+                let registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
+                let resource = registry.get(&desktopId.clone().unwrap()).unwrap();
                 let response = SyscallResponse {
                     size: size_of::<RequestResourceV1Response>(),
                     request_uuid: (*request).uuid.clone(),
@@ -370,7 +371,8 @@ pub fn syscall_sync(req: usize) -> usize {
         } else if ((*request).uuid == syscall_id::CALL_RESOURCE_METHOD_V1) {
             let requestTyped = unsafe { &*(req as *const SyscallRequest<CallResourceMethodV1>) };
 
-            let resource = RESOURCE_LOCAL_REGISTRY.lock().unwrap().get(&requestTyped.payload.resource);
+            let registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
+            let resource = registry.get(&requestTyped.payload.resource);
             if (resource.is_some()) {
                 if (resource
                     .unwrap()

@@ -28,8 +28,6 @@ pub const RESOURCE_FILESYSTEM_ITEM_CURRENT_DIR_TAG: crate::uuid::Uuid =
     crate::uuid::Uuid::from_u128(0x03071a33_9b6d_4c2e_8f7a_aea9b057a344);
 
 pub fn get_resource_by_path(path: String) -> Option<Arc<Resource>> {
-    let a=RESOURCE_LOCAL_REGISTRY.try_lock();
-    let registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
     if (path.contains(':')) {
         let protocol = path.split(':').next().unwrap();
         if (protocol == "matios") {
@@ -38,6 +36,8 @@ pub fn get_resource_by_path(path: String) -> Option<Arc<Resource>> {
                 let processId = std::process::id();
                 let process = unsafe { windows_sys::Win32::System::Threading::GetCurrentProcess() };
                 let sytheticProcessId = 0x30312746_893c_4654_a9b5_000000000000;
+
+                let registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
                 let resource =
                     registry.get(&Uuid::from_u128((sytheticProcessId + processId as u128)));
                 return resource.cloned();
@@ -50,6 +50,8 @@ pub fn get_resource_by_path(path: String) -> Option<Arc<Resource>> {
     } else {
         let uuid = Uuid::parse_str(path.as_str());
         if (uuid.is_ok()) {
+
+            let registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
             let resource = registry.get(&uuid.unwrap());
             if (resource.is_some()) {
                 return resource.cloned();

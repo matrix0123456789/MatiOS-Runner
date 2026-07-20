@@ -36,7 +36,7 @@ pub fn prepare_filesystem() {
         current_directory_id.clone().unwrap(),
         current_directory_resource.clone(),
     );
-    let mut process_resource = Arc::get_mut(RESOURCE_LOCAL_REGISTRY.lock().unwrap().get_mut(&Uuid::from_u128(sythetic_process_id + process_id)).unwrap()).unwrap().connected_resources.push(current_directory_resource.clone());
+    Arc::get_mut(RESOURCE_LOCAL_REGISTRY.lock().unwrap().get_mut(&Uuid::from_u128(sythetic_process_id + process_id)).unwrap()).unwrap().connected_resources.push(current_directory_resource.clone());
 
     // registry.insert(root_directory_id.clone().unwrap(), root_directory_resource);
 }
