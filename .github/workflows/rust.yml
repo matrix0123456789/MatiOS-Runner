@@ -25,14 +25,14 @@ jobs:
         rustup target add x86_64-unknown-linux-gnu
     - name: Build windows
       run: cargo build --release --package MatiOsRunner --bin MatiOsRunner --target x86_64-pc-windows-gnu
-    - name: Make result directory
-      run: mkdir result
+    - run: mkdir result
+    - run: mkdir result/windows_x64
     - name: Copy windows
-      run: cp target/x86_64-pc-windows-gnu/release/MatiOsRunner.exe result/MatiOsRunner.exe
-    - name: Build linux
-      run: cargo build --release --package MatiOsRunner --bin MatiOsRunner --target x86_64-unknown-linux-gnu
-    - name: Copy linux
-      run: cp target/x86_64-unknown-linux-gnu/release/MatiOsRunner result/MatiOsRunner
+      run: cp target/x86_64-pc-windows-gnu/release/MatiOsRunner.exe result/windows_x64/MatiOsRunner.exe
+#    - name: Build linux
+#      run: cargo build --release --package MatiOsRunner --bin MatiOsRunner --target x86_64-unknown-linux-gnu
+#    - name: Copy linux
+#      run: cp target/x86_64-unknown-linux-gnu/release/MatiOsRunner result/MatiOsRunner
     - name: Upload
       uses: actions/upload-artifact@v7
       with:
