@@ -100,7 +100,9 @@ impl TypedValue {
             (buff as *mut usize).write(values.len());
             let valuesPtr = (buff as *mut usize).offset(1) as *mut TypedValue;
             for i in 0..values.len() {
-                valuesPtr.offset(i as isize).write_volatile(values[i].clone())
+                valuesPtr
+                    .offset(i as isize)
+                    .write_volatile(values[i].clone())
             }
             TypedValue {
                 value_type: 12,
@@ -108,8 +110,8 @@ impl TypedValue {
             }
         }
     }
-    pub fn get_as_u64(&self)->u64{
-        if(self.value_type!=8){
+    pub fn get_as_u64(&self) -> u64 {
+        if (self.value_type != 8) {
             panic!("Invalid value type");
         }
         return self.value as u64;
@@ -127,7 +129,9 @@ impl TypedValue {
             (buff as *mut usize).write(values.len());
             let valuesPtr = (buff as *mut usize).offset(1) as *mut KeyedTypedValue;
             for i in 0..values.len() {
-                valuesPtr.offset(i as isize).write_volatile(values[i].clone())
+                valuesPtr
+                    .offset(i as isize)
+                    .write_volatile(values[i].clone())
             }
             TypedValue {
                 value_type: 13,
@@ -170,6 +174,15 @@ impl Clone for KeyedTypedValue {
             value_type: self.value_type,
             value: self.value,
             key: String::from(self.key.as_str()),
+        };
+    }
+}
+impl KeyedTypedValue {
+    pub fn from(key: String, value: TypedValue) -> KeyedTypedValue {
+        return KeyedTypedValue {
+            value_type: value.value_type,
+            value: value.value,
+            key: key,
         };
     }
 }

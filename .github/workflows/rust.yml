@@ -1,0 +1,25 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build
+      run: cargo build --package MatiOsRunner --bin MatiOsRunner --target x86_64-pc-windows-msvc
+    - name: Upload
+      uses: actions/upload-artifact@v7
+      with:
+        name: matiosshell
+        path: target/x86_64-pc-windows-msvc/debug/MatiOsRunner.exe

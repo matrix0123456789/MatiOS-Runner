@@ -1,3 +1,4 @@
+use crate::bitmap::Color;
 use crate::resource_local_registry::{Resource, RESOURCE_LOCAL_REGISTRY};
 use crate::resources::{RESOURCE_BYTE_STREAM_ID, RESOURCE_DESKTOP_ID, RESOURCE_WINDOW_ID};
 use crate::syscalls::debug::print_v1::PrintV1;
@@ -9,7 +10,10 @@ use crate::syscalls::resources::create_resource_v1::{CreateResourceV1, CreateRes
 use crate::syscalls::resources::get_resource_info_v1::{
     GetResourceInfoV1Request, GetResourceInfoV1Response,
 };
-use crate::typed_value::TypedValue;
+use crate::syscalls::resources::request_resource_v1::{
+    RequestResourceV1, RequestResourceV1Response,
+};
+use crate::typed_value::{KeyedTypedValue, TypedValue};
 use crate::uuid::Uuid;
 use once_cell::race::OnceBox;
 use std::cell::{LazyCell, RefCell};
@@ -21,24 +25,21 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
-use windows_sys::core::{PCSTR, PCWSTR};
+use windows_sys::core::{BOOL, PCSTR, PCWSTR};
 use windows_sys::Win32::Foundation::{
     GetLastError, COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM,
 };
-use windows_sys::Win32::Graphics::Gdi::{BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection, CreateSolidBrush, DeleteDC, EndPaint, GetDC, GetDIBits, InvalidateRect, ReleaseDC, SelectObject, SetPixel, UpdateWindow, ValidateRect, BITMAPINFO, BITMAPINFOHEADER, BI_BITFIELDS, BI_RGB, DIBSECTION, DIB_RGB_COLORS, HBRUSH, PAINTSTRUCT, RGBQUAD, SRCCOPY};
+use windows_sys::Win32::Graphics::Gdi::{
+    BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection,
+    CreateSolidBrush, DeleteDC, EndPaint, GetDC, GetDIBits, InvalidateRect, ReleaseDC,
+    SelectObject, SetPixel, UpdateWindow, ValidateRect, BITMAPINFO, BITMAPINFOHEADER, BI_BITFIELDS,
+    BI_RGB, DIBSECTION, DIB_RGB_COLORS, HBRUSH, PAINTSTRUCT, RGBQUAD, SRCCOPY,
+};
 use windows_sys::Win32::System::Kernel::NULL64;
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetModuleHandleW};
 use windows_sys::Win32::System::Threading::Sleep;
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExA, CreateWindowExW, DefWindowProcA, DestroyWindow, DispatchMessageA,
-    GetDesktopWindow, GetMessageA, LoadCursorW, PostQuitMessage, RegisterClassA, RegisterClassExA,
-    RegisterClassExW, RegisterClassW, ShowWindow, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW,
-    MINMAXINFO, SW_SHOW, WINDOW_EX_STYLE, WM_CLOSE, WM_GETMINMAXINFO, WNDCLASSA, WNDCLASSEXA,
-    WNDCLASSEXW, WNDCLASSW, WS_BORDER, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
-};
+use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExA, CreateWindowExW, DefWindowProcA, DestroyWindow, DispatchMessageA, EnumWindows, GetClassNameW, GetDesktopWindow, GetMessageA, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, LoadCursorW, PostQuitMessage, RegisterClassA, RegisterClassExA, RegisterClassExW, RegisterClassW, ShowWindow, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, MINMAXINFO, SW_SHOW, WINDOW_EX_STYLE, WM_CLOSE, WM_GETMINMAXINFO, WNDCLASSA, WNDCLASSEXA, WNDCLASSEXW, WNDCLASSW, WS_BORDER, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_VISIBLE};
 use windows_sys::{s, w};
-use crate::bitmap::Color;
-use crate::syscalls::resources::request_resource_v1::{RequestResourceV1, RequestResourceV1Response};
 
 #[repr(C)]
 pub struct SyscallRequest<T> {
@@ -104,8 +105,7 @@ pub fn syscall_sync(req: usize) -> usize {
                     },
                 };
                 return Box::into_raw(Box::from(response)) as usize;
-            }
-            else if ((*requestTyped).payload.resource_type == RESOURCE_WINDOW_ID) {
+            } else if ((*requestTyped).payload.resource_type == RESOURCE_WINDOW_ID) {
                 use windows_sys::{
                     core::*, Win32::Foundation::*, Win32::Graphics::Gdi::ValidateRect,
                     Win32::System::LibraryLoader::GetModuleHandleA,
@@ -120,7 +120,7 @@ pub fn syscall_sync(req: usize) -> usize {
                     ) -> LRESULT {
                         unsafe {
                             match message {
-                                WM_PAINT  => {
+                                WM_PAINT => {
                                     // println!("WM_PAINT");
                                     if (lastWindowContent.contains_key("pixels")) {
                                         let mut pixels =
@@ -156,12 +156,19 @@ pub fn syscall_sync(req: usize) -> usize {
                                             0 as HANDLE,
                                             0,
                                         );
-                                        (pixels2 as *mut u32)
-                                            .copy_from(pixels as *mut u32, (width * height) as usize);
+                                        (pixels2 as *mut u32).copy_from(
+                                            pixels as *mut u32,
+                                            (width * height) as usize,
+                                        );
                                         for i in 0..(width * height) {
-                                            (pixels2 as *mut u32).offset(i as isize).write_volatile(
-                                                (pixels as *mut Color).offset(i as isize).read_volatile().to32bitInt()
-                                            );
+                                            (pixels2 as *mut u32)
+                                                .offset(i as isize)
+                                                .write_volatile(
+                                                    (pixels as *mut Color)
+                                                        .offset(i as isize)
+                                                        .read_volatile()
+                                                        .to32bitInt(),
+                                                );
                                         }
 
                                         let hdcMemory = CreateCompatibleDC(dc);
@@ -172,7 +179,14 @@ pub fn syscall_sync(req: usize) -> usize {
                                         SelectObject(memdc, dibSection);
 
                                         BitBlt(
-                                            hdc, 0, 0, width as i32, height as i32, memdc, 0, 0,
+                                            hdc,
+                                            0,
+                                            0,
+                                            width as i32,
+                                            height as i32,
+                                            memdc,
+                                            0,
+                                            0,
                                             SRCCOPY,
                                         );
                                         DeleteDC(memdc);
@@ -200,7 +214,7 @@ pub fn syscall_sync(req: usize) -> usize {
                         hCursor: LoadCursorW(core::ptr::null_mut(), IDC_ARROW),
                         hInstance: instance,
                         lpszClassName: window_class,
-                        style: CS_VREDRAW|CS_HREDRAW|CS_CLASSDC,
+                        style: CS_VREDRAW | CS_HREDRAW | CS_CLASSDC,
                         lpfnWndProc: Some(wndproc),
                         cbClsExtra: 0,
                         cbWndExtra: 0,
@@ -239,7 +253,7 @@ pub fn syscall_sync(req: usize) -> usize {
                     // }
                 });
                 WindowThreadPtr = Box::into_raw(Box::from(window_thread)) as usize;
-                let windowId = Some(Uuid::from_u128(101)); //tmp, do random gen
+                let windowId = Some(Uuid::from_u128(0x303)); //tmp, do random gen
 
                 let mut methods: HashMap<String, fn(TypedValue) -> TypedValue> = HashMap::new();
                 methods.insert("writeBitmapBuffer".to_string(), |x| {
@@ -249,14 +263,14 @@ pub fn syscall_sync(req: usize) -> usize {
                     }
 
                     SetWindowPos(
-                            WindowHandle,
-                            core::ptr::null_mut(),
-                            0,
-                            0,
-                            lastWindowContent.get("width").unwrap().get_as_u64() as i32,
-                            lastWindowContent.get("height").unwrap().get_as_u64() as i32,
-                            SWP_NOMOVE,
-                        );
+                        WindowHandle,
+                        core::ptr::null_mut(),
+                        0,
+                        0,
+                        lastWindowContent.get("width").unwrap().get_as_u64() as i32,
+                        lastWindowContent.get("height").unwrap().get_as_u64() as i32,
+                        SWP_NOMOVE,
+                    );
                     InvalidateRect(WindowHandle, 0 as *mut RECT, 1);
                     //     let mut message = std::mem::zeroed();
                     //     GetMessageA(&mut message, core::ptr::null_mut(), 0, 0);
@@ -286,17 +300,51 @@ pub fn syscall_sync(req: usize) -> usize {
             }
         } else if ((*request).uuid == syscall_id::REQUEST_RESOURCE_V1) {
             let requestTyped = unsafe { &*(req as *const SyscallRequest<RequestResourceV1>) };
-            if ((*requestTyped).payload.resource_type == RESOURCE_DESKTOP_ID){
-                let desktopId = Some(Uuid::from_u128(0x1000000001)); //tmp, do random gen
+            if ((*requestTyped).payload.resource_type == RESOURCE_DESKTOP_ID) {
+                let desktopId = Some(Uuid::from_u128(0x70000000007)); //tmp, do random gen
                 let mut methods: HashMap<String, fn(TypedValue) -> TypedValue> = HashMap::new();
                 methods.insert("getWindows".to_string(), |text| {
                     println!("getWindows");
+                    let mut windowsList: Box<Vec<TypedValue>> = Box::from(Vec::new());
+                    unsafe extern "system" fn enum_windows_callback(
+                        hwnd: HWND,
+                        lparam: LPARAM,
+                    ) -> BOOL {
+                        let mut windowsList=Box::from_raw(lparam as *mut Vec<TypedValue>);
+                        let mut rect = RECT::default();
+                        let aa = GetWindowRect(hwnd, &mut rect);
+println!("GetWindowRect: {}, {}, {}, {}", rect.top, rect.left, rect.bottom, rect.right );
 
-                    TypedValue::null()
+                        let mut buffer = vec![0u16; 256];
+                        let written = GetClassNameW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32);
+
+                       let className= String::from_utf16_lossy(&buffer[..written.max(0) as usize]);
+                        println!("className: {}", className);
+
+                        let len = GetWindowTextLengthW(hwnd);
+                        let mut buffer2 = vec![0u16; (len.max(0) as usize) + 1];
+                        let written = GetWindowTextW(hwnd, buffer2.as_mut_ptr(), buffer2.len() as i32);
+
+                        let windowName=String::from_utf16_lossy(&buffer2[..written.max(0) as usize]);
+                        println!("windowName: {}", windowName);
+
+                        windowsList.push(TypedValue::structure(&[
+                            KeyedTypedValue::from("className".to_string(), TypedValue::string(className)),
+                            KeyedTypedValue::from( "windowName".to_string(), TypedValue::string(windowName))
+                        ]));
+
+                        1
+                    }
+                    let windowsListRaw=Box::into_raw(windowsList);
+                    let windowsListCopy=Box::from_raw(windowsListRaw);
+                    unsafe {
+                        EnumWindows(Some(enum_windows_callback), windowsListRaw as LPARAM);
+                    }
+                    TypedValue::vector(windowsListCopy.as_slice())
                 });
                 let mut registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
                 registry.insert(
-                    StdOutResourceUuid.clone().unwrap(),
+                    desktopId.clone().unwrap(),
                     Resource {
                         uuid: desktopId.clone().unwrap(),
                         resource_type: RESOURCE_DESKTOP_ID,
