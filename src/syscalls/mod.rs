@@ -1,6 +1,6 @@
 use crate::bitmap::Color;
 use crate::resource_local_registry::{Resource, RESOURCE_LOCAL_REGISTRY};
-use crate::resources::{RESOURCE_BYTE_STREAM_ID, RESOURCE_DESKTOP_ID, RESOURCE_WINDOW_ID};
+use crate::resources::{RESOURCE_BYTE_STREAM_ID, RESOURCE_BYTE_STREAM_TAG_STDIN, RESOURCE_BYTE_STREAM_TAG_STDOUT, RESOURCE_DESKTOP_ID, RESOURCE_WINDOW_ID};
 use crate::syscalls::debug::print_v1::PrintV1;
 use crate::syscalls::process::current_process_info_v1::CurrentProcessInfoV1Response;
 use crate::syscalls::resources::call_resource_method_v1::{
@@ -22,7 +22,8 @@ use std::ffi::c_void;
 use std::ptr::null;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, Mutex};
-use std::thread;
+use std::{io, thread};
+use std::io::{Read, Write};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use windows_sys::core::{BOOL, PCSTR, PCWSTR};
@@ -38,7 +39,14 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::System::Kernel::NULL64;
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetModuleHandleW};
 use windows_sys::Win32::System::Threading::Sleep;
-use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExA, CreateWindowExW, DefWindowProcA, DestroyWindow, DispatchMessageA, EnumWindows, GetClassNameW, GetDesktopWindow, GetMessageA, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, LoadCursorW, PostQuitMessage, RegisterClassA, RegisterClassExA, RegisterClassExW, RegisterClassW, ShowWindow, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, MINMAXINFO, SW_SHOW, WINDOW_EX_STYLE, WM_CLOSE, WM_GETMINMAXINFO, WNDCLASSA, WNDCLASSEXA, WNDCLASSEXW, WNDCLASSW, WS_BORDER, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_VISIBLE};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExA, CreateWindowExW, DefWindowProcA, DestroyWindow, DispatchMessageA, EnumWindows,
+    GetClassNameW, GetDesktopWindow, GetMessageA, GetWindowRect, GetWindowTextLengthW,
+    GetWindowTextW, LoadCursorW, PostQuitMessage, RegisterClassA, RegisterClassExA,
+    RegisterClassExW, RegisterClassW, ShowWindow, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW,
+    MINMAXINFO, SW_SHOW, WINDOW_EX_STYLE, WM_CLOSE, WM_GETMINMAXINFO, WNDCLASSA, WNDCLASSEXA,
+    WNDCLASSEXW, WNDCLASSW, WS_BORDER, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+};
 use windows_sys::{s, w};
 
 #[repr(C)]
@@ -60,6 +68,7 @@ pub mod resources;
 pub mod syscall_id;
 
 static mut StdOutResourceUuid: Option<Uuid> = None;
+static mut StdInResourceUuid: Option<Uuid> = None;
 
 static mut WindowHandle: HWND = 0 as HWND;
 static mut WindowThreadPtr: usize = 0;
@@ -80,31 +89,72 @@ pub fn syscall_sync(req: usize) -> usize {
         } else if ((*request).uuid == syscall_id::CREATE_RESOURCE_V1) {
             let requestTyped = unsafe { &*(req as *const SyscallRequest<CreateResourceV1>) };
             if ((*requestTyped).payload.resource_type == RESOURCE_BYTE_STREAM_ID) {
-                StdOutResourceUuid = Some(Uuid::from_u128(1)); //tmp, do random gen
-                let mut methods: HashMap<String, fn(TypedValue) -> TypedValue> = HashMap::new();
-                methods.insert("write".to_string(), |text| {
-                    println!("{}", *(text.value as *const String));
-                    TypedValue::null()
-                });
-                let mut registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
-                registry.insert(
-                    StdOutResourceUuid.clone().unwrap(),
-                    Resource {
-                        uuid: StdOutResourceUuid.clone().unwrap(),
-                        resource_type: RESOURCE_BYTE_STREAM_ID,
-                        name: "StdOut".to_string(),
-                        methods,
-                    },
-                );
+                if ((*requestTyped)
+                    .payload
+                    .tags
+                    .contains(&RESOURCE_BYTE_STREAM_TAG_STDOUT))
+                {
+                    StdOutResourceUuid = Some(Uuid::from_u128(1)); //tmp, do random gen
+                    let mut methods: HashMap<String, fn(TypedValue) -> TypedValue> = HashMap::new();
+                    methods.insert("write".to_string(), |text| {
+                                                let strBytes = (*(text.value as *const String)).as_bytes();
+                        console::Term::stdout().write(strBytes);
+                        console::Term::stdout().flush();
+                        TypedValue::null()
+                    });
+                    let mut registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
+                    registry.insert(
+                        StdOutResourceUuid.clone().unwrap(),
+                        Resource {
+                            uuid: StdOutResourceUuid.clone().unwrap(),
+                            resource_type: RESOURCE_BYTE_STREAM_ID,
+                            name: "StdOut".to_string(),
+                            methods,
+                        },
+                    );
 
-                let response = SyscallResponse {
-                    size: size_of::<CreateResourceV1Response>(),
-                    request_uuid: (*request).uuid.clone(),
-                    payload: CreateResourceV1Response {
-                        uuid: StdOutResourceUuid.clone().unwrap(),
-                    },
-                };
-                return Box::into_raw(Box::from(response)) as usize;
+                    let response = SyscallResponse {
+                        size: size_of::<CreateResourceV1Response>(),
+                        request_uuid: (*request).uuid.clone(),
+                        payload: CreateResourceV1Response {
+                            uuid: StdOutResourceUuid.clone().unwrap(),
+                        },
+                    };
+                    return Box::into_raw(Box::from(response)) as usize;
+                } else if ((*requestTyped)
+                    .payload
+                    .tags
+                    .contains(&RESOURCE_BYTE_STREAM_TAG_STDIN))
+                {
+                    StdInResourceUuid = Some(Uuid::from_u128(2)); //tmp, do random gen
+                    let mut methods: HashMap<String, fn(TypedValue) -> TypedValue> = HashMap::new();
+                    methods.insert("read".to_string(), |_| {
+                        let char = console::Term::stdout().read_char().unwrap();
+                        let string = String::from(char);
+                        return TypedValue::string(string.to_string());
+                    });
+                    let mut registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
+                    registry.insert(
+                        StdInResourceUuid.clone().unwrap(),
+                        Resource {
+                            uuid: StdInResourceUuid.clone().unwrap(),
+                            resource_type: RESOURCE_BYTE_STREAM_ID,
+                            name: "StdIn".to_string(),
+                            methods,
+                        },
+                    );
+
+                    let response = SyscallResponse {
+                        size: size_of::<CreateResourceV1Response>(),
+                        request_uuid: (*request).uuid.clone(),
+                        payload: CreateResourceV1Response {
+                            uuid: StdInResourceUuid.clone().unwrap(),
+                        },
+                    };
+                    return Box::into_raw(Box::from(response)) as usize;
+                } else {
+                    panic!("Unknown");
+                }
             } else if ((*requestTyped).payload.resource_type == RESOURCE_WINDOW_ID) {
                 use windows_sys::{
                     core::*, Win32::Foundation::*, Win32::Graphics::Gdi::ValidateRect,
@@ -310,33 +360,45 @@ pub fn syscall_sync(req: usize) -> usize {
                         hwnd: HWND,
                         lparam: LPARAM,
                     ) -> BOOL {
-                        let mut windowsList=Box::from_raw(lparam as *mut Vec<TypedValue>);
+                        let mut windowsList = Box::from_raw(lparam as *mut Vec<TypedValue>);
                         let mut rect = RECT::default();
                         let aa = GetWindowRect(hwnd, &mut rect);
-println!("GetWindowRect: {}, {}, {}, {}", rect.top, rect.left, rect.bottom, rect.right );
+                        println!(
+                            "GetWindowRect: {}, {}, {}, {}",
+                            rect.top, rect.left, rect.bottom, rect.right
+                        );
 
                         let mut buffer = vec![0u16; 256];
                         let written = GetClassNameW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32);
 
-                       let className= String::from_utf16_lossy(&buffer[..written.max(0) as usize]);
+                        let className =
+                            String::from_utf16_lossy(&buffer[..written.max(0) as usize]);
                         println!("className: {}", className);
 
                         let len = GetWindowTextLengthW(hwnd);
                         let mut buffer2 = vec![0u16; (len.max(0) as usize) + 1];
-                        let written = GetWindowTextW(hwnd, buffer2.as_mut_ptr(), buffer2.len() as i32);
+                        let written =
+                            GetWindowTextW(hwnd, buffer2.as_mut_ptr(), buffer2.len() as i32);
 
-                        let windowName=String::from_utf16_lossy(&buffer2[..written.max(0) as usize]);
+                        let windowName =
+                            String::from_utf16_lossy(&buffer2[..written.max(0) as usize]);
                         println!("windowName: {}", windowName);
 
                         windowsList.push(TypedValue::structure(&[
-                            KeyedTypedValue::from("className".to_string(), TypedValue::string(className)),
-                            KeyedTypedValue::from( "windowName".to_string(), TypedValue::string(windowName))
+                            KeyedTypedValue::from(
+                                "className".to_string(),
+                                TypedValue::string(className),
+                            ),
+                            KeyedTypedValue::from(
+                                "windowName".to_string(),
+                                TypedValue::string(windowName),
+                            ),
                         ]));
 
                         1
                     }
-                    let windowsListRaw=Box::into_raw(windowsList);
-                    let windowsListCopy=Box::from_raw(windowsListRaw);
+                    let windowsListRaw = Box::into_raw(windowsList);
+                    let windowsListCopy = Box::from_raw(windowsListRaw);
                     unsafe {
                         EnumWindows(Some(enum_windows_callback), windowsListRaw as LPARAM);
                     }
