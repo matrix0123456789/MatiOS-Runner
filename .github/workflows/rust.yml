@@ -17,11 +17,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Setup
-      run: rustup target add x86_64-pc-windows-msvc
+      run: rustup target add x86_64-pc-windows-gnu
     - name: Build
-      run: cargo build --package MatiOsRunner --bin MatiOsRunner --target x86_64-pc-windows-msvc
+      run: cargo build --package MatiOsRunner --bin MatiOsRunner --target x86_64-pc-windows-gnu
     - name: Upload
       uses: actions/upload-artifact@v7
       with:
         name: matiosshell
-        path: target/x86_64-pc-windows-msvc/debug/MatiOsRunner.exe
+        path: target/x86_64-pc-windows-gnu/debug/MatiOsRunner.exe
