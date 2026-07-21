@@ -420,20 +420,37 @@ pub fn syscall_sync(req: usize) -> usize {
                 unsafe { &*(req as *const SyscallRequest<GetResourceInfoV1Request>) };
             let uuid = requestTyped.payload.uuid;
             let registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
-            let resource = registry.get(&uuid).unwrap();
+            let resource_option = registry.get(&uuid);
+            let response;
+            if(resource_option.is_some()) {
+                let resource = resource_option.unwrap();
 
-            let response = SyscallResponse {
-                size: size_of::<GetResourceInfoV1Response>(),
-                request_uuid: (*request).uuid.clone(),
-                payload: GetResourceInfoV1Response {
-                    uuid: (&resource).uuid,
-                    name: (&resource).name.clone(),
-                    resource_type:(&resource).resource_type,
-                    tags: (&resource).tags.clone(),
-                    methods: resource.methods.keys().map(|x| x.clone()).collect(),
-                    connected_resources: (&resource).connected_resources.iter().map(|x| x.uuid).collect(),
-                },
-            };
+                 response = SyscallResponse {
+                    size: size_of::<GetResourceInfoV1Response>(),
+                    request_uuid: (*request).uuid.clone(),
+                    payload: GetResourceInfoV1Response {
+                        uuid: (&resource).uuid,
+                        name: (&resource).name.clone(),
+                        resource_type: (&resource).resource_type,
+                        tags: (&resource).tags.clone(),
+                        methods: resource.methods.keys().map(|x| x.clone()).collect(),
+                        connected_resources: (&resource).connected_resources.iter().map(|x| x.uuid).collect(),
+                    },
+                };
+            }else{
+                 response = SyscallResponse {
+                    size: size_of::<GetResourceInfoV1Response>(),
+                    request_uuid: (*request).uuid.clone(),
+                    payload: GetResourceInfoV1Response {
+                        uuid: Uuid::from_u128(0),
+                        name: String::new(),
+                        resource_type: Uuid::from_u128(0),
+                        tags: vec![],
+                        methods: vec![],
+                        connected_resources: vec![],
+                    },
+                };
+            }
 
             return Box::into_raw(Box::from(response)) as usize;
         } else if ((*request).uuid == syscall_id::GET_RESOURCE_BY_PATH_V1) {
