@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use windows_sys::core::BOOL;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, RECT};
-use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetClassNameW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW};
+use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetClassNameW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IsWindowVisible};
 use crate::resource_local_registry::{Resource, RESOURCE_LOCAL_REGISTRY};
 use crate::resources::RESOURCE_DESKTOP_ID;
 use crate::syscalls::resources::request_resource_v1::RequestResourceV1Response;
@@ -21,7 +21,7 @@ pub fn prepare_current_desktop() {
                 hwnd: HWND,
                 lparam: LPARAM,
             ) -> BOOL {
-                let mut windowsList = Box::from_raw(lparam as *mut Vec<TypedValue>);
+                let mut windowsList = lparam as *mut Vec<TypedValue>;
                 let mut rect = RECT::default();
                 let aa = GetWindowRect(hwnd, &mut rect);
                 println!(
@@ -45,7 +45,10 @@ pub fn prepare_current_desktop() {
                     String::from_utf16_lossy(&buffer2[..written.max(0) as usize]);
                 println!("windowName: {}", windowName);
 
-                windowsList.push(TypedValue::structure(&[
+                let isVisible=IsWindowVisible(hwnd);
+                println!("isVisible: {}", isVisible);
+
+                (*windowsList).push(TypedValue::structure(&[
                     KeyedTypedValue::from(
                         "className".to_string(),
                         TypedValue::string(className),
@@ -53,6 +56,10 @@ pub fn prepare_current_desktop() {
                     KeyedTypedValue::from(
                         "windowName".to_string(),
                         TypedValue::string(windowName),
+                    ),
+                    KeyedTypedValue::from(
+                        "isVisible".to_string(),
+                        TypedValue::bool(isVisible != 0),
                     ),
                 ]));
 

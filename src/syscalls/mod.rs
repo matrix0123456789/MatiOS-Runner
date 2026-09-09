@@ -114,7 +114,8 @@ pub fn syscall_sync(req: usize) -> usize {
                             uuid: StdOutResourceUuid.clone().unwrap(),
                             resource_type: RESOURCE_BYTE_STREAM_ID,
                             name: "StdOut".to_string(),
-                            methods,..Default::default()
+                            methods,
+                            ..Default::default()
                         }),
                     );
 
@@ -144,7 +145,8 @@ pub fn syscall_sync(req: usize) -> usize {
                             uuid: StdInResourceUuid.clone().unwrap(),
                             resource_type: RESOURCE_BYTE_STREAM_ID,
                             name: "StdIn".to_string(),
-                            methods,..Default::default()
+                            methods,
+                            ..Default::default()
                         }),
                     );
 
@@ -175,7 +177,7 @@ pub fn syscall_sync(req: usize) -> usize {
                         unsafe {
                             match message {
                                 WM_PAINT => {
-                                    // println!("WM_PAINT");
+                                    println!("WM_PAINT");
                                     if (lastWindowContent.contains_key("pixels")) {
                                         let mut pixels =
                                             lastWindowContent.get("pixels").unwrap().get_as_u64();
@@ -310,21 +312,42 @@ pub fn syscall_sync(req: usize) -> usize {
                 let windowId = Some(Uuid::from_u128(0x303)); //tmp, do random gen
 
                 let mut methods: HashMap<String, fn(TypedValue) -> TypedValue> = HashMap::new();
+                methods.insert("getSize".to_string(), |x| {
+                    let mut rect = RECT::default();
+                    GetWindowRect(WindowHandle, &mut rect);
+                    return TypedValue::structure(&[
+                        KeyedTypedValue::from(
+                            "width".to_string(),
+                             TypedValue::u64((rect.right - rect.left) as u64),
+                            //TypedValue::u64(300),
+                        ),
+                        KeyedTypedValue::from(
+                            "height".to_string(),
+                            TypedValue::u64((rect.bottom - rect.top) as u64),
+                           // TypedValue::u64(500),
+                        ),
+                        KeyedTypedValue::from("pixelRatio".to_string(), TypedValue::u64(1)),
+                    ]);
+                });
                 methods.insert("writeBitmapBuffer".to_string(), |x| {
                     let structure = x.get_as_structure();
                     unsafe {
                         lastWindowContent = LazyCell::from(structure);
                     }
 
-                    SetWindowPos(
-                        WindowHandle,
-                        core::ptr::null_mut(),
-                        0,
-                        0,
-                        lastWindowContent.get("width").unwrap().get_as_u64() as i32,
-                        lastWindowContent.get("height").unwrap().get_as_u64() as i32,
-                        SWP_NOMOVE,
-                    );
+                    // SetWindowPos(
+                    //     WindowHandle,
+                    //     core::ptr::null_mut(),
+                    //     0,
+                    //     0,
+                    //     lastWindowContent.get("width").unwrap().get_as_u64() as i32,
+                    //     lastWindowContent.get("height").unwrap().get_as_u64() as i32,
+                    //     SWP_NOMOVE,
+                    // );
+                    //
+                    // let mut rect = RECT::default();
+                    // GetWindowRect(WindowHandle, &mut rect);
+
                     InvalidateRect(WindowHandle, 0 as *mut RECT, 1);
                     //     let mut message = std::mem::zeroed();
                     //     GetMessageA(&mut message, core::ptr::null_mut(), 0, 0);
@@ -422,10 +445,10 @@ pub fn syscall_sync(req: usize) -> usize {
             let registry = RESOURCE_LOCAL_REGISTRY.lock().unwrap();
             let resource_option = registry.get(&uuid);
             let response;
-            if(resource_option.is_some()) {
+            if (resource_option.is_some()) {
                 let resource = resource_option.unwrap();
 
-                 response = SyscallResponse {
+                response = SyscallResponse {
                     size: size_of::<GetResourceInfoV1Response>(),
                     request_uuid: (*request).uuid.clone(),
                     payload: GetResourceInfoV1Response {
@@ -434,11 +457,15 @@ pub fn syscall_sync(req: usize) -> usize {
                         resource_type: (&resource).resource_type,
                         tags: (&resource).tags.clone(),
                         methods: resource.methods.keys().map(|x| x.clone()).collect(),
-                        connected_resources: (&resource).connected_resources.iter().map(|x| x.uuid).collect(),
+                        connected_resources: (&resource)
+                            .connected_resources
+                            .iter()
+                            .map(|x| x.uuid)
+                            .collect(),
                     },
                 };
-            }else{
-                 response = SyscallResponse {
+            } else {
+                response = SyscallResponse {
                     size: size_of::<GetResourceInfoV1Response>(),
                     request_uuid: (*request).uuid.clone(),
                     payload: GetResourceInfoV1Response {
